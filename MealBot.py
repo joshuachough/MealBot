@@ -8,6 +8,8 @@
 # --PersonList.txt (default name for this can be redefined below):
 #   A tab-delimited (by default, but that's configurable) csv file of students.
 #   Each student must have 'Name' and 'Email'. Additional columns are OK, too.
+#   Delimiting it by tabs means that you can copy-paste directly from a Google sheet into
+#   a text file, and it will work.
 # --Message.txt:
 #   Create a file with the body of the email you want sent out to each pair. The string
 #   '{GroupList}' should appear exactly once in this file; in the sent emails, '{GroupList}'
