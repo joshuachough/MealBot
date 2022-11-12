@@ -1,6 +1,6 @@
 Randomly group people together to get a meal together, and send an email to everyone to tell them what their group is!
 
-1. As described [here](https://developers.google.com/gmail/api/quickstart/python), set up a Google Cloud project, enable the Gmail API, and create credentials for a desktop application. Store the credentials JSON file as `client_secret.json` in your working directory as you run `MealBot.py`.
+1. As described [here](https://developers.google.com/gmail/api/quickstart/python), set up a Google Cloud project, enable the Gmail API, and create credentials for a desktop application. Store the credentials JSON file as `client_secret.json` in your working directory as you run `MealBot.py`. (Alternatively, just get a JSON file directly from Alex.)
 
 2. You will also need to use pip to install a couple of modules that may not already be installed on your machine:
 
