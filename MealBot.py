@@ -23,6 +23,8 @@ import argparse
 import csv
 import httplib2
 import os
+import math
+from datetime import date, timedelta
 from httplib2 import Http
 from oauth2client import client, tools, file
 import base64
@@ -39,7 +41,7 @@ DEFAULT_SUBJECT           = "[YSC MealBot] This week's meal group!"
 DEFAULT_CREDENTIAL_FILE   = 'client_secret.json'
 DEFAULT_TOKEN_FILE        = 'token.json'
 
-SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly']
+SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly', 'https://www.googleapis.com/auth/spreadsheets']
 APPLICATION_NAME = 'YSC MEALBOT'
 DISCOVERY_DOC = 'https://forms.googleapis.com/$discovery/rest?version=v1'
 SIGNUP_FORM_ID = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
@@ -47,6 +49,9 @@ FIRST_NAME_QID = '76e2ebcf'
 LAST_NAME_QID = '3b64eca4'
 YEAR_QID = '32825110'
 COLLEGE_QID = '555d65c7'
+
+PAIRINGS_SHEET_ID = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
+PAIRINGS_RANGE = 'Sheet1!A2:B'
 
 def main():
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
@@ -95,8 +100,32 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
         print('You must have more than 1 student.')
         return
     
-    # Divide into groups
-    groups = chunk(personList, groupSize)
+    # Get previous pairings
+    pairings, sheet = getPairings(credentials)
+    print(pairings)
+    
+    while True:
+        # Divide into groups
+        groups = chunk(personList, groupSize)
+        
+        # Check if all groups are not in pairings
+        found = 0
+        for grp in groups:
+            if len(grp) == 1:
+                continue
+            if frozenset([person.name for person in grp]) in pairings:
+                found += 1
+                break
+        if not found:
+            break
+        else:
+            numCombinations = math.comb(len(personList), groupSize)
+            if numCombinations - found < len(personList)/groupSize:
+                print('Not enough combinations left to avoid previous pairings.')
+                break
+    
+    # Save the groups
+    saveGroups(groups, sheet)
     
     # Print the groups
     print('Randomized groups:\n')
@@ -136,13 +165,6 @@ class Person:
         return self.fields[key]
 
 def formPersonList(credentials):
-    # # Initialize list to hold persons
-    # personList = []
-    # with open(person_file, newline='') as csvfile:
-    #     reader = csv.DictReader(csvfile, delimiter=PERSON_FILE_DELIMITER)
-    #     for row in reader:
-    #         personList.append(Person(row))
-
     personList = []
     service = discovery.build('forms', 'v1', http=credentials.authorize(
     Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
@@ -173,6 +195,32 @@ def chunk(l, n):
         groups[-2].append(groups[-1].pop())
         groups.pop()
     return groups
+
+def getPairings(credentials):
+    pairings = set()
+    try:
+        service = discovery.build('sheets', 'v4', credentials=credentials)
+        sheet = service.spreadsheets()
+        result = sheet.values().get(spreadsheetId=PAIRINGS_SHEET_ID, range=PAIRINGS_RANGE).execute()
+        values = result.get('values', [])
+        for row in values:
+            pairings.add(frozenset(row[1].split(', ')))
+    except errors.HttpError as error:
+        print('An error occurred: %s' % error)
+    return pairings, sheet
+
+def saveGroups(groups, sheet):
+    currRow = len(sheet.values().get(spreadsheetId=PAIRINGS_SHEET_ID, range=PAIRINGS_RANGE).execute().get('values', [])) + 2
+    week = getWeekString()
+    sheet.values().update(spreadsheetId=PAIRINGS_SHEET_ID, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
+        'values': [[week, ', '.join([person.name for person in grp])] for grp in groups]
+    }).execute()
+
+def getWeekString():
+    today = date.today()
+    start = today - timedelta(days=today.weekday())
+    end = start + timedelta(days=6)
+    return f"{start.strftime('%W')} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
 
 def sendEmails(groups, sender, subject, rawBody, credentials):
     http = credentials.authorize(httplib2.Http())
