@@ -23,6 +23,7 @@ import argparse
 import csv
 import httplib2
 import os
+from httplib2 import Http
 from oauth2client import client, tools, file
 import base64
 from email.mime.multipart import MIMEMultipart
@@ -38,8 +39,14 @@ DEFAULT_BOT_EMAIL_ADDRESS = 'ysc.meal.bot@gmail.com'
 DEFAULT_SUBJECT           = "[YSC MealBot] This week's meal group!"
 DEFAULT_CREDENTIAL_FILE   = 'client_secret.json'
 
-SCOPES = 'https://www.googleapis.com/auth/gmail.send'
+SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly']
 APPLICATION_NAME = 'Gmail API Python Send Email'
+DISCOVERY_DOC = 'https://forms.googleapis.com/$discovery/rest?version=v1'
+SIGNUP_FORM_ID = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
+FIRST_NAME_QID = '76e2ebcf'
+LAST_NAME_QID = '3b64eca4'
+YEAR_QID = '32825110'
+COLLEGE_QID = '555d65c7'
 
 def main():
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
@@ -74,9 +81,11 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
     messageFile = open(messageFilename, 'r')
     message = messageFile.read()
     messageFile.close()
+
+    credentials = getCredentials(credentialFilename)
     
     # Get a random list of Students
-    personList = formPersonList(personFilename)
+    personList = formPersonList(credentials)
     
     if len(personList) == 1:
         print('You must have more than 1 student.')
@@ -98,7 +107,7 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
     # Send email?
     if input('Send emails? (Y/n) =>') == 'Y':
         print('Sending emails...')
-        sendEmails(groups, sender, subject, message, credentialFilename)
+        sendEmails(groups, sender, subject, message, credentials)
         print('Emails away!')
     else:
         print('Not sending emails.')
@@ -106,8 +115,12 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
 class Person:
     def __init__(self, d):
         try:
-            self.name = d['Name']
-            self.email = d['Email']
+            self.firstname = d['firstname']
+            self.lastname = d['lastname']
+            self.year = d['year']
+            self.college = d['college']
+            self.name = self.firstname + ' ' + self.lastname
+            self.email = d['email']
         except KeyError as err:
             print('Your person list file must have columns titled "Name" and "Email"')
             print(d)
@@ -118,13 +131,26 @@ class Person:
     def __getitem__(self, key):
         return self.fields[key]
 
-def formPersonList(person_file):
-    # Initialize list to hold persons
+def formPersonList(credentials):
+    # # Initialize list to hold persons
+    # personList = []
+    # with open(person_file, newline='') as csvfile:
+    #     reader = csv.DictReader(csvfile, delimiter=PERSON_FILE_DELIMITER)
+    #     for row in reader:
+    #         personList.append(Person(row))
+
     personList = []
-    with open(person_file, newline='') as csvfile:
-        reader = csv.DictReader(csvfile, delimiter=PERSON_FILE_DELIMITER)
-        for row in reader:
-            personList.append(Person(row))
+    service = discovery.build('forms', 'v1', http=credentials.authorize(
+    Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
+    result = service.forms().responses().list(formId=SIGNUP_FORM_ID).execute()
+    for response in result['responses']:
+        personList.append(Person({
+            'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'],
+            'lastname': response['answers'][LAST_NAME_QID]['textAnswers']['answers'][0]['value'],
+            'year': response['answers'][YEAR_QID]['textAnswers']['answers'][0]['value'],
+            'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
+            'email': response['respondentEmail']
+        }))
     
     # Return randomized list
     random.shuffle(personList)
@@ -144,8 +170,7 @@ def chunk(l, n):
         groups.pop()
     return groups
 
-def sendEmails(groups, sender, subject, rawBody, credentialFilename):
-    credentials = getCredentials(credentialFilename)
+def sendEmails(groups, sender, subject, rawBody, credentials):
     http = credentials.authorize(httplib2.Http())
     service = discovery.build('gmail', 'v1', http=http)
     
