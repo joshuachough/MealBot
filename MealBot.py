@@ -37,9 +37,10 @@ DEFAULT_GROUP_SIZE        = 2
 DEFAULT_BOT_EMAIL_ADDRESS = 'YSC Mealbot <josh.chough@yale.edu>'
 DEFAULT_SUBJECT           = "[YSC MealBot] This week's meal group!"
 DEFAULT_CREDENTIAL_FILE   = 'client_secret.json'
+DEFAULT_TOKEN_FILE        = 'token.json'
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly']
-APPLICATION_NAME = 'Gmail API Python Send Email'
+APPLICATION_NAME = 'YSC MEALBOT'
 DISCOVERY_DOC = 'https://forms.googleapis.com/$discovery/rest?version=v1'
 SIGNUP_FORM_ID = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
 FIRST_NAME_QID = '76e2ebcf'
@@ -73,15 +74,19 @@ def main():
                         help='''JSON file containing the credential provided by Google API. 
                                 Defaults to '''+DEFAULT_CREDENTIAL_FILE,
                         default=DEFAULT_CREDENTIAL_FILE)
+    parser.add_argument('-t', '--token-file',
+                        help='''JSON file containing the token provided by Google API. 
+                                Defaults to '''+DEFAULT_TOKEN_FILE,
+                        default=DEFAULT_TOKEN_FILE)
     args = parser.parse_args()
-    mealBot(args.person_file, args.message_file, args.group_size, args.email, args.subject, args.credential_file)
+    mealBot(args.person_file, args.message_file, args.group_size, args.email, args.subject, args.credential_file, args.token_file)
 
-def mealBot(personFilename, messageFilename, groupSize, sender, subject, credentialFilename):
+def mealBot(personFilename, messageFilename, groupSize, sender, subject, credentialFilename, tokenFilename):
     messageFile = open(messageFilename, 'r')
     message = messageFile.read()
     messageFile.close()
 
-    credentials = getCredentials(credentialFilename)
+    credentials = getCredentials(credentialFilename, tokenFilename)
     
     # Get a random list of Students
     personList = formPersonList(credentials)
@@ -195,19 +200,14 @@ def createMessage(toEmails, sender, subject, plaintext):
     }
     return body
 
-def getCredentials(credentialFilename):
-    home_dir = os.path.expanduser('~')
-    credential_dir = os.path.join(home_dir, '.credentials')
-    if not os.path.exists(credential_dir):
-        os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir, 'gmail-python-email-send.json')
-    store = file.Storage(credential_path)
+def getCredentials(credentialFilename, tokenFilename):
+    store = file.Storage(tokenFilename)
     credentials = store.get()
     if not credentials or credentials.invalid:
         flow = client.flow_from_clientsecrets(credentialFilename, SCOPES)
         flow.user_agent = APPLICATION_NAME
         credentials = tools.run_flow(flow, store)
-        print('Storing credentials to ' + credential_path)
+        print('Storing credentials to ' + tokenFilename)
     return credentials
 
 def sendMessage(service, userID, message):
