@@ -26,8 +26,7 @@ import os
 from httplib2 import Http
 from oauth2client import client, tools, file
 import base64
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+from email.message import EmailMessage
 from apiclient import errors, discovery
 
 # Defaults - can be overridden with arguments.
@@ -35,7 +34,7 @@ PERSON_FILE_DELIMITER     = '\t'
 DEFAULT_PERSON_FILE       = 'PersonList.tsv'
 DEFAULT_MESSAGE_FILE      = 'Message.txt'
 DEFAULT_GROUP_SIZE        = 2
-DEFAULT_BOT_EMAIL_ADDRESS = 'ysc.meal.bot@gmail.com'
+DEFAULT_BOT_EMAIL_ADDRESS = 'YSC Mealbot <josh.chough@yale.edu>'
 DEFAULT_SUBJECT           = "[YSC MealBot] This week's meal group!"
 DEFAULT_CREDENTIAL_FILE   = 'client_secret.json'
 
@@ -183,14 +182,17 @@ def sendEmails(groups, sender, subject, rawBody, credentials):
         sendMessage(service, "me", message)
 
 def createMessage(toEmails, sender, subject, plaintext):
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From'] = sender
-    msg['To'] = toEmails
-    msg.attach(MIMEText(plaintext, 'plain'))
-    raw = base64.urlsafe_b64encode(msg.as_bytes())
-    raw = raw.decode()
-    body = {'raw': raw}
+    message = EmailMessage()
+
+    message.set_content(plaintext)
+    message['To'] = toEmails
+    message['From'] = sender
+    message['Subject'] = subject
+
+    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    body = {
+        'raw': encoded_message
+    }
     return body
 
 def getCredentials(credentialFilename):
