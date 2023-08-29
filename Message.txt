@@ -1,3 +1,5 @@
+=== This is a test email! Joshua is trying to set this up, so please ignore :) ===
+
 Beep boop!
 This is the YSC Meal Bot, randomly grouping you together to get a meal sometime this week.
 

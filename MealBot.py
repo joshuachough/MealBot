@@ -23,7 +23,6 @@ import argparse
 import csv
 import httplib2
 import os
-import oauth2client
 from oauth2client import client, tools, file
 import base64
 from email.mime.multipart import MIMEMultipart
@@ -32,7 +31,7 @@ from apiclient import errors, discovery
 
 # Defaults - can be overridden with arguments.
 PERSON_FILE_DELIMITER     = '\t'
-DEFAULT_PERSON_FILE       = 'PersonList.txt'
+DEFAULT_PERSON_FILE       = 'PersonList.tsv'
 DEFAULT_MESSAGE_FILE      = 'Message.txt'
 DEFAULT_GROUP_SIZE        = 2
 DEFAULT_BOT_EMAIL_ADDRESS = 'ysc.meal.bot@gmail.com'
@@ -175,7 +174,7 @@ def getCredentials(credentialFilename):
     if not os.path.exists(credential_dir):
         os.makedirs(credential_dir)
     credential_path = os.path.join(credential_dir, 'gmail-python-email-send.json')
-    store = oauth2client.file.Storage(credential_path)
+    store = file.Storage(credential_path)
     credentials = store.get()
     if not credentials or credentials.invalid:
         flow = client.flow_from_clientsecrets(credentialFilename, SCOPES)
