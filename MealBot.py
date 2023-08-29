@@ -23,24 +23,35 @@ import argparse
 import csv
 import httplib2
 import os
-import oauth2client
+import math
+from datetime import date, timedelta
+from httplib2 import Http
 from oauth2client import client, tools, file
 import base64
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+from email.message import EmailMessage
 from apiclient import errors, discovery
 
 # Defaults - can be overridden with arguments.
 PERSON_FILE_DELIMITER     = '\t'
-DEFAULT_PERSON_FILE       = 'PersonList.txt'
+DEFAULT_PERSON_FILE       = 'PersonList.tsv'
 DEFAULT_MESSAGE_FILE      = 'Message.txt'
 DEFAULT_GROUP_SIZE        = 2
-DEFAULT_BOT_EMAIL_ADDRESS = 'ysc.meal.bot@gmail.com'
+DEFAULT_BOT_EMAIL_ADDRESS = 'YSC Mealbot <josh.chough@yale.edu>'
 DEFAULT_SUBJECT           = "[YSC MealBot] This week's meal group!"
 DEFAULT_CREDENTIAL_FILE   = 'client_secret.json'
+DEFAULT_TOKEN_FILE        = 'token.json'
 
-SCOPES = 'https://www.googleapis.com/auth/gmail.send'
-APPLICATION_NAME = 'Gmail API Python Send Email'
+SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly', 'https://www.googleapis.com/auth/spreadsheets']
+APPLICATION_NAME = 'YSC MEALBOT'
+DISCOVERY_DOC = 'https://forms.googleapis.com/$discovery/rest?version=v1'
+SIGNUP_FORM_ID = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
+FIRST_NAME_QID = '76e2ebcf'
+LAST_NAME_QID = '3b64eca4'
+YEAR_QID = '32825110'
+COLLEGE_QID = '555d65c7'
+
+PAIRINGS_SHEET_ID = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
+PAIRINGS_RANGE = 'Sheet1!A2:B'
 
 def main():
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
@@ -68,23 +79,53 @@ def main():
                         help='''JSON file containing the credential provided by Google API. 
                                 Defaults to '''+DEFAULT_CREDENTIAL_FILE,
                         default=DEFAULT_CREDENTIAL_FILE)
+    parser.add_argument('-t', '--token-file',
+                        help='''JSON file containing the token provided by Google API. 
+                                Defaults to '''+DEFAULT_TOKEN_FILE,
+                        default=DEFAULT_TOKEN_FILE)
     args = parser.parse_args()
-    mealBot(args.person_file, args.message_file, args.group_size, args.email, args.subject, args.credential_file)
+    mealBot(args.person_file, args.message_file, args.group_size, args.email, args.subject, args.credential_file, args.token_file)
 
-def mealBot(personFilename, messageFilename, groupSize, sender, subject, credentialFilename):
+def mealBot(personFilename, messageFilename, groupSize, sender, subject, credentialFilename, tokenFilename):
     messageFile = open(messageFilename, 'r')
     message = messageFile.read()
     messageFile.close()
+
+    credentials = getCredentials(credentialFilename, tokenFilename)
     
     # Get a random list of Students
-    personList = formPersonList(personFilename)
+    personList = formPersonList(credentials)
     
     if len(personList) == 1:
         print('You must have more than 1 student.')
         return
     
-    # Divide into groups
-    groups = chunk(personList, groupSize)
+    # Get previous pairings
+    pairings, sheet = getPairings(credentials)
+    print(pairings)
+    
+    while True:
+        # Divide into groups
+        groups = chunk(personList, groupSize)
+        
+        # Check if all groups are not in pairings
+        found = 0
+        for grp in groups:
+            if len(grp) == 1:
+                continue
+            if frozenset([person.name for person in grp]) in pairings:
+                found += 1
+                break
+        if not found:
+            break
+        else:
+            numCombinations = math.comb(len(personList), groupSize)
+            if numCombinations - found < len(personList)/groupSize:
+                print('Not enough combinations left to avoid previous pairings.')
+                break
+    
+    # Save the groups
+    saveGroups(groups, sheet)
     
     # Print the groups
     print('Randomized groups:\n')
@@ -99,7 +140,7 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
     # Send email?
     if input('Send emails? (Y/n) =>') == 'Y':
         print('Sending emails...')
-        sendEmails(groups, sender, subject, message, credentialFilename)
+        sendEmails(groups, sender, subject, message, credentials)
         print('Emails away!')
     else:
         print('Not sending emails.')
@@ -107,8 +148,12 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
 class Person:
     def __init__(self, d):
         try:
-            self.name = d['Name']
-            self.email = d['Email']
+            self.firstname = d['firstname']
+            self.lastname = d['lastname']
+            self.year = d['year']
+            self.college = d['college']
+            self.name = self.firstname + ' ' + self.lastname
+            self.email = d['email']
         except KeyError as err:
             print('Your person list file must have columns titled "Name" and "Email"')
             print(d)
@@ -119,13 +164,19 @@ class Person:
     def __getitem__(self, key):
         return self.fields[key]
 
-def formPersonList(person_file):
-    # Initialize list to hold persons
+def formPersonList(credentials):
     personList = []
-    with open(person_file, newline='') as csvfile:
-        reader = csv.DictReader(csvfile, delimiter=PERSON_FILE_DELIMITER)
-        for row in reader:
-            personList.append(Person(row))
+    service = discovery.build('forms', 'v1', http=credentials.authorize(
+    Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
+    result = service.forms().responses().list(formId=SIGNUP_FORM_ID).execute()
+    for response in result['responses']:
+        personList.append(Person({
+            'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'],
+            'lastname': response['answers'][LAST_NAME_QID]['textAnswers']['answers'][0]['value'],
+            'year': response['answers'][YEAR_QID]['textAnswers']['answers'][0]['value'],
+            'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
+            'email': response['respondentEmail']
+        }))
     
     # Return randomized list
     random.shuffle(personList)
@@ -145,8 +196,33 @@ def chunk(l, n):
         groups.pop()
     return groups
 
-def sendEmails(groups, sender, subject, rawBody, credentialFilename):
-    credentials = getCredentials(credentialFilename)
+def getPairings(credentials):
+    pairings = set()
+    try:
+        service = discovery.build('sheets', 'v4', credentials=credentials)
+        sheet = service.spreadsheets()
+        result = sheet.values().get(spreadsheetId=PAIRINGS_SHEET_ID, range=PAIRINGS_RANGE).execute()
+        values = result.get('values', [])
+        for row in values:
+            pairings.add(frozenset(row[1].split(', ')))
+    except errors.HttpError as error:
+        print('An error occurred: %s' % error)
+    return pairings, sheet
+
+def saveGroups(groups, sheet):
+    currRow = len(sheet.values().get(spreadsheetId=PAIRINGS_SHEET_ID, range=PAIRINGS_RANGE).execute().get('values', [])) + 2
+    week = getWeekString()
+    sheet.values().update(spreadsheetId=PAIRINGS_SHEET_ID, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
+        'values': [[week, ', '.join([person.name for person in grp])] for grp in groups]
+    }).execute()
+
+def getWeekString():
+    today = date.today()
+    start = today - timedelta(days=today.weekday())
+    end = start + timedelta(days=6)
+    return f"{start.strftime('%W')} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
+
+def sendEmails(groups, sender, subject, rawBody, credentials):
     http = credentials.authorize(httplib2.Http())
     service = discovery.build('gmail', 'v1', http=http)
     
@@ -159,29 +235,27 @@ def sendEmails(groups, sender, subject, rawBody, credentialFilename):
         sendMessage(service, "me", message)
 
 def createMessage(toEmails, sender, subject, plaintext):
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From'] = sender
-    msg['To'] = toEmails
-    msg.attach(MIMEText(plaintext, 'plain'))
-    raw = base64.urlsafe_b64encode(msg.as_bytes())
-    raw = raw.decode()
-    body = {'raw': raw}
+    message = EmailMessage()
+
+    message.set_content(plaintext)
+    message['To'] = toEmails
+    message['From'] = sender
+    message['Subject'] = subject
+
+    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    body = {
+        'raw': encoded_message
+    }
     return body
 
-def getCredentials(credentialFilename):
-    home_dir = os.path.expanduser('~')
-    credential_dir = os.path.join(home_dir, '.credentials')
-    if not os.path.exists(credential_dir):
-        os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir, 'gmail-python-email-send.json')
-    store = oauth2client.file.Storage(credential_path)
+def getCredentials(credentialFilename, tokenFilename):
+    store = file.Storage(tokenFilename)
     credentials = store.get()
     if not credentials or credentials.invalid:
         flow = client.flow_from_clientsecrets(credentialFilename, SCOPES)
         flow.user_agent = APPLICATION_NAME
         credentials = tools.run_flow(flow, store)
-        print('Storing credentials to ' + credential_path)
+        print('Storing credentials to ' + tokenFilename)
     return credentials
 
 def sendMessage(service, userID, message):
