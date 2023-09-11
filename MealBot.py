@@ -62,7 +62,7 @@ DEFAULT_SUBJECT             = "[YSC MealBot] This week's meal group!"
 DEFAULT_CREDENTIALS_FILE    = 'client_secret.json'
 DEFAULT_TOKEN_FILE          = 'token.json'
 
-class Person:
+class Student:
     def __init__(self, d):
         try:
             self.firstname = d['firstname']
@@ -114,7 +114,7 @@ def main():
                         default=DEFAULT_SUBJECT)
     parser.add_argument('-m', '--message-file',
                         help='''File containing the email body ({GroupList} in the file will be replaced 
-                                with the list of people in the group). Defaults to '''+DEFAULT_MESSAGE_FILE,
+                                with the list of students in the group). Defaults to '''+DEFAULT_MESSAGE_FILE,
                         default=DEFAULT_MESSAGE_FILE)
     args = parser.parse_args()
     mealBot(args)
@@ -126,10 +126,10 @@ def mealBot(args):
 
     credentials = getCredentials(args.credentials_file, args.token_file, args.application_name)
     
-    # Get a random list of Students
-    personList = formPersonList(credentials, args.signup_form_id)
+    # Get a list of students
+    students = getStudents(credentials, args.signup_form_id)
     
-    if len(personList) == 1:
+    if len(students) == 1:
         print('You must have more than 1 student.')
         return
     
@@ -138,30 +138,32 @@ def mealBot(args):
     print(prevGroups)
     
     while True:
+        # Randomize the list
+        random.shuffle(students)
         # Divide into groups
-        groups = chunk(personList, args.group_size)
+        groups = chunk(students, args.group_size)
         
         # Check if all groups are not in prevGroups
         found = 0
         for grp in groups:
             if len(grp) == 1:
                 continue
-            if frozenset([person.name for person in grp]) in prevGroups:
+            if frozenset([student.name for student in grp]) in prevGroups:
                 found += 1
                 break
         if not found:
             break
         else:
-            numCombinations = math.comb(len(personList), args.group_size)
-            if numCombinations - found < len(personList)/args.group_size:
+            numCombinations = math.comb(len(students), args.group_size)
+            if numCombinations - found < len(students)/args.group_size:
                 print('Not enough combinations left to avoid previous groups.')
                 break
     
     # Print the groups
     print('Randomized groups:\n')
     for grp in groups:
-        for person in grp:
-            print(person.name, person.email, sep='\t')
+        for student in grp:
+            print(student.name, student.email, sep='\t')
         print()
     
     print('Subject: '+args.subject)
@@ -180,23 +182,20 @@ def mealBot(args):
     else:
         print('Not sending emails.')
 
-def formPersonList(credentials, signupFormId):
-    personList = []
+def getStudents(credentials, signupFormId):
+    students = []
     service = discovery.build('forms', 'v1', http=credentials.authorize(
     Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
     result = service.forms().responses().list(formId=signupFormId).execute()
     for response in result['responses']:
-        personList.append(Person({
+        students.append(Student({
             'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'],
             'lastname': response['answers'][LAST_NAME_QID]['textAnswers']['answers'][0]['value'],
             'year': response['answers'][YEAR_QID]['textAnswers']['answers'][0]['value'],
             'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
             'email': response['respondentEmail']
         }))
-    
-    # Return randomized list
-    random.shuffle(personList)
-    return personList
+    return students
 
 # Breaks the list l into chunks of size n. Remainders are distributed to other chunks.
 # Returns a list of lists.
@@ -229,7 +228,7 @@ def saveGroups(groups, sheet, spreadsheetId, range):
     currRow = len(sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute().get('values', [])) + 2
     week = getWeekString()
     sheet.values().update(spreadsheetId=spreadsheetId, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
-        'values': [[week, ', '.join([person.name for person in grp])] for grp in groups]
+        'values': [[week, ', '.join([student.name for student in grp])] for grp in groups]
     }).execute()
 
 def getWeekString():
@@ -243,8 +242,8 @@ def sendEmails(groups, sender, subject, rawBody, credentials):
     service = discovery.build('gmail', 'v1', http=http)
     
     for grp in groups:
-        namesLst = [person.name for person in grp]
-        emailsLst = [person.email for person in grp]
+        namesLst = [student.name for student in grp]
+        emailsLst = [student.email for student in grp]
         body = rawBody.replace('{GroupList}', '\n'.join(namesLst))
         emails = ', '.join(emailsLst)
         message = createMessage(emails, sender, subject, body)
