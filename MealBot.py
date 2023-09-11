@@ -4,25 +4,37 @@
 # solemn responsibility; misusing this script could send out a lot of mistaken, unwanted
 # emails.
 #
-# USAGE:
-# --PersonList.txt (default name for this can be redefined below):
-#   A tab-delimited (by default, but that's configurable) csv file of students.
-#   Each student must have 'Name' and 'Email'. Additional columns are OK, too.
-#   Delimiting it by tabs means that you can copy-paste directly from a Google sheet into
-#   a text file, and it will work.
+# Usage:
+# `python MealBot.py`
+#   Runs the script with the default arguments. This will randomly group students who have filled out the Google Form
+#   with SignupFormID while trying to avoid previous groupings stored in the Google Sheet with GroupingsSheetID, send an
+#   email to each group with the body of the email in Message.txt, and save the groupings to the Google Sheet with
+#   GroupingsSheetID.
+#
+# Important Arguments:
+# --SignupFormID:
+#   The ID of the Google Form that students fill out to sign up. The form must have
+#   the following questions:
+#       - First Name (short answer)
+#       - Last Name (short answer)
+#       - Email (short answer)
+#       - Year (short answer)
+#       - College (short answer)
+# --GroupingsSheetID:
+#   The ID of the Google Sheet that stores previous groupings. The sheet must have
+#   the following columns:
+#       - Week: The week of the grouping (e.g. "Week 1 | 08/30/21 - 09/05/21")
+#       - Grouping: The list of names in the group, separated by commas (e.g. "Alex Schurman, Bonnie Schurman")
+# --GroupingsRange:
+#   The range of the Google Sheet that stores previous groupings. Defaults to Sheet1!A2:B
 # --Message.txt:
-#   Create a file with the body of the email you want sent out to each group. The string
+#   A file with the body of the email you want sent out to each group. The string
 #   '{GroupList}' should appear exactly once in this file; in the sent emails, '{GroupList}'
 #   will be replaced with the list of names in the group, separated by a new line (\n)
-#
-# -- In the simplest case, run MealBot without arguments. It'll randomly group people from PersonList.txt,
-#    print the groupings, and then ask if you want to send the email to them all.
 
 import random
 import argparse
-import csv
 import httplib2
-import os
 import math
 from datetime import date, timedelta
 from httplib2 import Http
@@ -31,42 +43,52 @@ import base64
 from email.message import EmailMessage
 from apiclient import errors, discovery
 
-# Defaults - can be overridden with arguments.
-PERSON_FILE_DELIMITER     = '\t'
-DEFAULT_PERSON_FILE       = 'PersonList.tsv'
-DEFAULT_MESSAGE_FILE      = 'Message.txt'
-DEFAULT_GROUP_SIZE        = 2
-DEFAULT_BOT_EMAIL_ADDRESS = 'YSC Mealbot <josh.chough@yale.edu>'
-DEFAULT_SUBJECT           = "[YSC MealBot] This week's meal group!"
-DEFAULT_CREDENTIAL_FILE   = 'client_secret.json'
-DEFAULT_TOKEN_FILE        = 'token.json'
-
 SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly', 'https://www.googleapis.com/auth/spreadsheets']
-APPLICATION_NAME = 'YSC MEALBOT'
 DISCOVERY_DOC = 'https://forms.googleapis.com/$discovery/rest?version=v1'
-SIGNUP_FORM_ID = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
 FIRST_NAME_QID = '76e2ebcf'
 LAST_NAME_QID = '3b64eca4'
 YEAR_QID = '32825110'
 COLLEGE_QID = '555d65c7'
 
-GROUPINGS_SHEET_ID = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
-GROUPINGS_RANGE = 'Sheet1!A2:B'
+# Defaults - can be overridden with arguments.
+DEFAULT_APPLICATION_NAME    = 'YSC MEALBOT'
+DEFAULT_SIGNUP_FORM_ID      = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
+DEFAULT_GROUPINGS_SHEET_ID  = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
+DEFAULT_GROUPINGS_RANGE     = 'Sheet1!A2:B'
+DEFAULT_MESSAGE_FILE        = 'Message.txt'
+DEFAULT_GROUP_SIZE          = 2
+DEFAULT_BOT_EMAIL_ADDRESS   = 'YSC Mealbot <josh.chough@yale.edu>'
+DEFAULT_SUBJECT             = "[YSC MealBot] This week's meal group!"
+DEFAULT_CREDENTIALS_FILE    = 'client_secret.json'
+DEFAULT_TOKEN_FILE          = 'token.json'
 
 def main():
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
                                                     send an email to each group to inform them.''')
-    parser.add_argument('-p', '--person-file',
-                        help='''File containing the list of people to group. This must be a csv file, by 
-                                default delimited by tabs (but that's configurable in the script). 
-                                The columns 'Name' and 'Email' must be present. 
-                                Defaults to '''+DEFAULT_PERSON_FILE,
-                        default=DEFAULT_PERSON_FILE)
-    parser.add_argument('-m', '--message-file',
-                        help='''File containing the email body ({GroupList} in the file will be replaced 
-                                with the list of people in the group). Defaults to '''+DEFAULT_MESSAGE_FILE,
-                        default=DEFAULT_MESSAGE_FILE)
-    parser.add_argument('-g', '--group-size',
+    parser.add_argument('-a', '--application-name',
+                        help='Name of the application. Defaults to "'+DEFAULT_APPLICATION_NAME+'"',
+                        default=DEFAULT_APPLICATION_NAME)
+    parser.add_argument('-c', '--credentials-file',
+                        help='''JSON file containing the credentials provided by Google API. 
+                                Defaults to '''+DEFAULT_CREDENTIALS_FILE,
+                        default=DEFAULT_CREDENTIALS_FILE)
+    parser.add_argument('-t', '--token-file',
+                        help='''JSON file that will contain the token provided by Google API. 
+                                Defaults to '''+DEFAULT_TOKEN_FILE,
+                        default=DEFAULT_TOKEN_FILE)
+    parser.add_argument('-f', '--signup-form-id',
+                        help='''ID of the Google Form that students fill out to sign up.
+                                Defaults to '''+DEFAULT_SIGNUP_FORM_ID,
+                        default=DEFAULT_SIGNUP_FORM_ID)
+    parser.add_argument('-g', '--groupings-sheet-id',
+                        help='''ID of the Google Sheet that stores previous groupings.
+                                Defaults to '''+DEFAULT_GROUPINGS_SHEET_ID,
+                        default=DEFAULT_GROUPINGS_SHEET_ID)
+    parser.add_argument('-r', '--groupings-range',
+                        help='''Range of the Google Sheet that stores previous groupings.
+                                Defaults to '''+DEFAULT_GROUPINGS_RANGE,
+                        default=DEFAULT_GROUPINGS_RANGE)
+    parser.add_argument('-n', '--group-size',
                         help='How large each random group should be. Defaults to '+str(DEFAULT_GROUP_SIZE),
                         default=DEFAULT_GROUP_SIZE)
     parser.add_argument('-e', '--email',
@@ -75,38 +97,34 @@ def main():
     parser.add_argument('-s', '--subject',
                         help='Subject line for the emails. Defaults to "'+DEFAULT_SUBJECT+'"',
                         default=DEFAULT_SUBJECT)
-    parser.add_argument('-c', '--credential-file',
-                        help='''JSON file containing the credential provided by Google API. 
-                                Defaults to '''+DEFAULT_CREDENTIAL_FILE,
-                        default=DEFAULT_CREDENTIAL_FILE)
-    parser.add_argument('-t', '--token-file',
-                        help='''JSON file containing the token provided by Google API. 
-                                Defaults to '''+DEFAULT_TOKEN_FILE,
-                        default=DEFAULT_TOKEN_FILE)
+    parser.add_argument('-m', '--message-file',
+                        help='''File containing the email body ({GroupList} in the file will be replaced 
+                                with the list of people in the group). Defaults to '''+DEFAULT_MESSAGE_FILE,
+                        default=DEFAULT_MESSAGE_FILE)
     args = parser.parse_args()
-    mealBot(args.person_file, args.message_file, args.group_size, args.email, args.subject, args.credential_file, args.token_file)
+    mealBot(args)
 
-def mealBot(personFilename, messageFilename, groupSize, sender, subject, credentialFilename, tokenFilename):
-    messageFile = open(messageFilename, 'r')
+def mealBot(args):
+    messageFile = open(args.message_file, 'r')
     message = messageFile.read()
     messageFile.close()
 
-    credentials = getCredentials(credentialFilename, tokenFilename)
+    credentials = getCredentials(args.credentials_file, args.token_file, args.application_name)
     
     # Get a random list of Students
-    personList = formPersonList(credentials)
+    personList = formPersonList(credentials, args.signup_form_id)
     
     if len(personList) == 1:
         print('You must have more than 1 student.')
         return
     
     # Get previous groupings
-    groupings, sheet = getGroupings(credentials)
+    groupings, sheet = getGroupings(credentials, args.groupings_sheet_id, args.groupings_range)
     print(groupings)
     
     while True:
         # Divide into groups
-        groups = chunk(personList, groupSize)
+        groups = chunk(personList, args.group_size)
         
         # Check if all groups are not in groupings
         found = 0
@@ -119,8 +137,8 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
         if not found:
             break
         else:
-            numCombinations = math.comb(len(personList), groupSize)
-            if numCombinations - found < len(personList)/groupSize:
+            numCombinations = math.comb(len(personList), args.group_size)
+            if numCombinations - found < len(personList)/args.group_size:
                 print('Not enough combinations left to avoid previous groupings.')
                 break
     
@@ -131,18 +149,18 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
             print(person.name, person.email, sep='\t')
         print()
     
-    print('Subject: '+subject)
+    print('Subject: '+args.subject)
     print('\nBody:\n'+message)
     
     # Send email?
     if input('Send emails? (Y/n) =>').lower() == 'y':
         print('Sending emails...')
-        sendEmails(groups, sender, subject, message, credentials)
+        sendEmails(groups, args.sender, args.subject, message, credentials)
         print('Emails away!')
 
         # Save the groups
         print('Saving groups...')
-        saveGroups(groups, sheet)
+        saveGroups(groups, sheet, args.groupings_sheet_id, args.groupings_range)
         print('Groups saved!')
     else:
         print('Not sending emails.')
@@ -166,11 +184,11 @@ class Person:
     def __getitem__(self, key):
         return self.fields[key]
 
-def formPersonList(credentials):
+def formPersonList(credentials, signupFormId):
     personList = []
     service = discovery.build('forms', 'v1', http=credentials.authorize(
     Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
-    result = service.forms().responses().list(formId=SIGNUP_FORM_ID).execute()
+    result = service.forms().responses().list(formId=signupFormId).execute()
     for response in result['responses']:
         personList.append(Person({
             'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'],
@@ -198,12 +216,12 @@ def chunk(l, n):
         groups.pop()
     return groups
 
-def getGroupings(credentials):
+def getGroupings(credentials, spreadsheetId, range):
     groupings = set()
     try:
         service = discovery.build('sheets', 'v4', credentials=credentials)
         sheet = service.spreadsheets()
-        result = sheet.values().get(spreadsheetId=GROUPINGS_SHEET_ID, range=GROUPINGS_RANGE).execute()
+        result = sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute()
         values = result.get('values', [])
         for row in values:
             groupings.add(frozenset(row[1].split(', ')))
@@ -211,10 +229,10 @@ def getGroupings(credentials):
         print('An error occurred: %s' % error)
     return groupings, sheet
 
-def saveGroups(groups, sheet):
-    currRow = len(sheet.values().get(spreadsheetId=GROUPINGS_SHEET_ID, range=GROUPINGS_RANGE).execute().get('values', [])) + 2
+def saveGroups(groups, sheet, spreadsheetId, range):
+    currRow = len(sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute().get('values', [])) + 2
     week = getWeekString()
-    sheet.values().update(spreadsheetId=GROUPINGS_SHEET_ID, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
+    sheet.values().update(spreadsheetId=spreadsheetId, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
         'values': [[week, ', '.join([person.name for person in grp])] for grp in groups]
     }).execute()
 
@@ -222,7 +240,7 @@ def getWeekString():
     today = date.today()
     start = today - timedelta(days=today.weekday())
     end = start + timedelta(days=6)
-    return f"{start.strftime('%W')} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
+    return f"Week {start.strftime('%W')} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
 
 def sendEmails(groups, sender, subject, rawBody, credentials):
     http = credentials.authorize(httplib2.Http())
@@ -250,12 +268,12 @@ def createMessage(toEmails, sender, subject, plaintext):
     }
     return body
 
-def getCredentials(credentialFilename, tokenFilename):
+def getCredentials(credentialFilename, tokenFilename, user_agent):
     store = file.Storage(tokenFilename)
     credentials = store.get()
     if not credentials or credentials.invalid:
         flow = client.flow_from_clientsecrets(credentialFilename, SCOPES)
-        flow.user_agent = APPLICATION_NAME
+        flow.user_agent = user_agent
         credentials = tools.run_flow(flow, store)
         print('Storing credentials to ' + tokenFilename)
     return credentials
