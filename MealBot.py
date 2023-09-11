@@ -11,12 +11,12 @@
 #   Delimiting it by tabs means that you can copy-paste directly from a Google sheet into
 #   a text file, and it will work.
 # --Message.txt:
-#   Create a file with the body of the email you want sent out to each pair. The string
+#   Create a file with the body of the email you want sent out to each group. The string
 #   '{GroupList}' should appear exactly once in this file; in the sent emails, '{GroupList}'
 #   will be replaced with the list of names in the group, separated by a new line (\n)
 #
-# -- In the simplest case, run MealBot without arguments. It'll randomly pair people from PersonList.txt,
-#    print the pairings, and then ask if you want to send the email to them all.
+# -- In the simplest case, run MealBot without arguments. It'll randomly group people from PersonList.txt,
+#    print the groupings, and then ask if you want to send the email to them all.
 
 import random
 import argparse
@@ -50,8 +50,8 @@ LAST_NAME_QID = '3b64eca4'
 YEAR_QID = '32825110'
 COLLEGE_QID = '555d65c7'
 
-PAIRINGS_SHEET_ID = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
-PAIRINGS_RANGE = 'Sheet1!A2:B'
+GROUPINGS_SHEET_ID = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
+GROUPINGS_RANGE = 'Sheet1!A2:B'
 
 def main():
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
@@ -100,20 +100,20 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
         print('You must have more than 1 student.')
         return
     
-    # Get previous pairings
-    pairings, sheet = getPairings(credentials)
-    print(pairings)
+    # Get previous groupings
+    groupings, sheet = getGroupings(credentials)
+    print(groupings)
     
     while True:
         # Divide into groups
         groups = chunk(personList, groupSize)
         
-        # Check if all groups are not in pairings
+        # Check if all groups are not in groupings
         found = 0
         for grp in groups:
             if len(grp) == 1:
                 continue
-            if frozenset([person.name for person in grp]) in pairings:
+            if frozenset([person.name for person in grp]) in groupings:
                 found += 1
                 break
         if not found:
@@ -121,11 +121,8 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
         else:
             numCombinations = math.comb(len(personList), groupSize)
             if numCombinations - found < len(personList)/groupSize:
-                print('Not enough combinations left to avoid previous pairings.')
+                print('Not enough combinations left to avoid previous groupings.')
                 break
-    
-    # Save the groups
-    saveGroups(groups, sheet)
     
     # Print the groups
     print('Randomized groups:\n')
@@ -138,10 +135,15 @@ def mealBot(personFilename, messageFilename, groupSize, sender, subject, credent
     print('\nBody:\n'+message)
     
     # Send email?
-    if input('Send emails? (Y/n) =>') == 'Y':
+    if input('Send emails? (Y/n) =>').lower() == 'y':
         print('Sending emails...')
         sendEmails(groups, sender, subject, message, credentials)
         print('Emails away!')
+
+        # Save the groups
+        print('Saving groups...')
+        saveGroups(groups, sheet)
+        print('Groups saved!')
     else:
         print('Not sending emails.')
 
@@ -159,7 +161,7 @@ class Person:
             print(d)
             raise
         self.fields = d
-        self.paired = False
+        self.grouped = False
     
     def __getitem__(self, key):
         return self.fields[key]
@@ -196,23 +198,23 @@ def chunk(l, n):
         groups.pop()
     return groups
 
-def getPairings(credentials):
-    pairings = set()
+def getGroupings(credentials):
+    groupings = set()
     try:
         service = discovery.build('sheets', 'v4', credentials=credentials)
         sheet = service.spreadsheets()
-        result = sheet.values().get(spreadsheetId=PAIRINGS_SHEET_ID, range=PAIRINGS_RANGE).execute()
+        result = sheet.values().get(spreadsheetId=GROUPINGS_SHEET_ID, range=GROUPINGS_RANGE).execute()
         values = result.get('values', [])
         for row in values:
-            pairings.add(frozenset(row[1].split(', ')))
+            groupings.add(frozenset(row[1].split(', ')))
     except errors.HttpError as error:
         print('An error occurred: %s' % error)
-    return pairings, sheet
+    return groupings, sheet
 
 def saveGroups(groups, sheet):
-    currRow = len(sheet.values().get(spreadsheetId=PAIRINGS_SHEET_ID, range=PAIRINGS_RANGE).execute().get('values', [])) + 2
+    currRow = len(sheet.values().get(spreadsheetId=GROUPINGS_SHEET_ID, range=GROUPINGS_RANGE).execute().get('values', [])) + 2
     week = getWeekString()
-    sheet.values().update(spreadsheetId=PAIRINGS_SHEET_ID, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
+    sheet.values().update(spreadsheetId=GROUPINGS_SHEET_ID, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
         'values': [[week, ', '.join([person.name for person in grp])] for grp in groups]
     }).execute()
 
