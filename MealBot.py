@@ -62,6 +62,21 @@ DEFAULT_SUBJECT             = "[YSC MealBot] This week's meal group!"
 DEFAULT_CREDENTIALS_FILE    = 'client_secret.json'
 DEFAULT_TOKEN_FILE          = 'token.json'
 
+class Person:
+    def __init__(self, d):
+        try:
+            self.firstname = d['firstname']
+            self.lastname = d['lastname']
+            self.year = d['year']
+            self.college = d['college']
+            self.name = self.firstname + ' ' + self.lastname
+            self.email = d['email']
+        except KeyError as err:
+            print('You must have a key for '+err.args[0]+' in your JSON file.')
+            print(d)
+            raise
+        self.grouped = False
+
 def main():
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
                                                     send an email to each group to inform them.''')
@@ -164,25 +179,6 @@ def mealBot(args):
         print('Groups saved!')
     else:
         print('Not sending emails.')
-
-class Person:
-    def __init__(self, d):
-        try:
-            self.firstname = d['firstname']
-            self.lastname = d['lastname']
-            self.year = d['year']
-            self.college = d['college']
-            self.name = self.firstname + ' ' + self.lastname
-            self.email = d['email']
-        except KeyError as err:
-            print('Your person list file must have columns titled "Name" and "Email"')
-            print(d)
-            raise
-        self.fields = d
-        self.grouped = False
-    
-    def __getitem__(self, key):
-        return self.fields[key]
 
 def formPersonList(credentials, signupFormId):
     personList = []
