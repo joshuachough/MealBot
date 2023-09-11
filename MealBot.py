@@ -35,7 +35,7 @@
 import random
 import argparse
 import httplib2
-import math
+import itertools
 from datetime import date, timedelta
 from httplib2 import Http
 from oauth2client import client, tools, file
@@ -75,7 +75,27 @@ class Student:
             print('You must have a key for '+err.args[0]+' in your JSON file.')
             print(d)
             raise
-        self.grouped = False
+
+# Function to generate all possible combinations of k-groups from a list of students
+def generate_combinations(students, k):
+    return list(itertools.combinations(students, k))
+
+# Function to filter out combinations that have been used before
+def filter_combinations(combinations, prevGroups):
+    new_groups = []
+    for grp in combinations:
+        if frozenset([student.name for student in grp]) not in prevGroups:
+            new_groups.append(grp)
+    return new_groups
+
+# Breaks the list l into chunks of size n. Assume that len(l) % n == 0.
+# Returns a list of lists.
+# EX. l = [0, 1, 2, 3]; n = 2. Returns [[0, 1], [2, 3]]
+def chunk(l, n):
+    # First break into chunks. Groups is a list of list of Students
+    n = max(1, n)
+    groups = [l[i:i + n] for i in range(0, len(l), n)]
+    return groups
 
 def main():
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
@@ -137,27 +157,40 @@ def mealBot(args):
     prevGroups, sheet = getPrevGroups(credentials, args.groups_sheet_id, args.groups_range)
     print(prevGroups)
     
-    while True:
-        # Randomize the list
-        random.shuffle(students)
-        # Divide into groups
-        groups = chunk(students, args.group_size)
-        
-        # Check if all groups are not in prevGroups
-        found = 0
-        for grp in groups:
-            if len(grp) == 1:
-                continue
-            if frozenset([student.name for student in grp]) in prevGroups:
-                found += 1
-                break
-        if not found:
-            break
-        else:
-            numCombinations = math.comb(len(students), args.group_size)
-            if numCombinations - found < len(students)/args.group_size:
-                print('Not enough combinations left to avoid previous groups.')
-                break
+    # Randomize the list of students
+    random.shuffle(students)
+
+    # Generate all possible combinations of groups
+    combinations = generate_combinations(students, args.group_size)
+    print('Total combinations:', len(combinations))
+    new_groups = filter_combinations(combinations, prevGroups)
+    print('Total new combinations:', len(new_groups))
+
+    # Find the set of groups that maximizes the number of new groups
+    max_new_groups = 0
+    groups = []
+    participants = []
+    for i, ngrp in enumerate(new_groups):
+        temp_students = [student for student in ngrp]
+        temp_groups = [ngrp]
+        for j in range(i+1, len(new_groups)):
+            mgrp = new_groups[j]
+            if len(set(mgrp).intersection(set(temp_students))) == 0:
+                temp_students.extend(mgrp)
+                temp_groups.append(mgrp)
+        if len(temp_groups) > max_new_groups:
+            max_new_groups = len(temp_groups)
+            groups = temp_groups
+            participants = temp_students
+    print('Max new groups found:', max_new_groups)
+    print('New groups:', groups)
+
+    if len(participants) != len(students):
+        remaining_students = [student for student in students if student not in participants]
+        print('Remaining students:', remaining_students)
+        old = chunk(remaining_students, args.group_size)
+        print('Old groups reused:', old)
+        groups.extend(old)
     
     # Print the groups
     print('Randomized groups:\n')
@@ -196,20 +229,6 @@ def getStudents(credentials, signupFormId):
             'email': response['respondentEmail']
         }))
     return students
-
-# Breaks the list l into chunks of size n. Remainders are distributed to other chunks.
-# Returns a list of lists.
-# EX. l = [0, 1, 2, 3]; n = 2. Returns [[0, 1], [2, 3]]
-def chunk(l, n):
-    # First break into chunks. Groups is a list of list of Students
-    n = max(1, n)
-    groups = [l[i:i + n] for i in range(0, len(l), n)]
-    
-    # Now if there are any singletons (they'll be at the end of the list), add them to other groups
-    while len(groups[-1]) == 1:
-        groups[-2].append(groups[-1].pop())
-        groups.pop()
-    return groups
 
 def getPrevGroups(credentials, spreadsheetId, range):
     prevGroups = set()
