@@ -7,9 +7,9 @@
 # Usage:
 # `python MealBot.py`
 #   Runs the script with the default arguments. This will randomly group students who have filled out the Google Form
-#   with SignupFormID while trying to avoid previous groupings stored in the Google Sheet with GroupingsSheetID, send an
-#   email to each group with the body of the email in Message.txt, and save the groupings to the Google Sheet with
-#   GroupingsSheetID.
+#   with SignupFormID while trying to avoid previous groups stored in the Google Sheet with GroupsSheetID, send an
+#   email to each group with the body of the email in Message.txt, and save the groups to the Google Sheet with
+#   GroupsSheetID.
 #
 # Important Arguments:
 # --SignupFormID:
@@ -20,13 +20,13 @@
 #       - Email (short answer)
 #       - Year (short answer)
 #       - College (short answer)
-# --GroupingsSheetID:
-#   The ID of the Google Sheet that stores previous groupings. The sheet must have
+# --GroupsSheetID:
+#   The ID of the Google Sheet that stores previous groups. The sheet must have
 #   the following columns:
-#       - Week: The week of the grouping (e.g. "Week 1 | 08/30/21 - 09/05/21")
-#       - Grouping: The list of names in the group, separated by commas (e.g. "Alex Schurman, Bonnie Schurman")
-# --GroupingsRange:
-#   The range of the Google Sheet that stores previous groupings. Defaults to Sheet1!A2:B
+#       - Week: The week of the group (e.g. "Week 1 | 08/30/21 - 09/05/21")
+#       - Group: The list of names in the group, separated by commas (e.g. "Alex Schurman, Bonnie Schurman")
+# --GroupsRange:
+#   The range of the Google Sheet that stores previous groups. Defaults to Sheet1!A2:B
 # --Message.txt:
 #   A file with the body of the email you want sent out to each group. The string
 #   '{GroupList}' should appear exactly once in this file; in the sent emails, '{GroupList}'
@@ -53,8 +53,8 @@ COLLEGE_QID = '555d65c7'
 # Defaults - can be overridden with arguments.
 DEFAULT_APPLICATION_NAME    = 'YSC MEALBOT'
 DEFAULT_SIGNUP_FORM_ID      = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
-DEFAULT_GROUPINGS_SHEET_ID  = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
-DEFAULT_GROUPINGS_RANGE     = 'Sheet1!A2:B'
+DEFAULT_GROUPS_SHEET_ID     = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
+DEFAULT_GROUPS_RANGE        = 'Sheet1!A2:B'
 DEFAULT_MESSAGE_FILE        = 'Message.txt'
 DEFAULT_GROUP_SIZE          = 2
 DEFAULT_BOT_EMAIL_ADDRESS   = 'YSC Mealbot <josh.chough@yale.edu>'
@@ -95,14 +95,14 @@ def main():
                         help='''ID of the Google Form that students fill out to sign up.
                                 Defaults to '''+DEFAULT_SIGNUP_FORM_ID,
                         default=DEFAULT_SIGNUP_FORM_ID)
-    parser.add_argument('-g', '--groupings-sheet-id',
-                        help='''ID of the Google Sheet that stores previous groupings.
-                                Defaults to '''+DEFAULT_GROUPINGS_SHEET_ID,
-                        default=DEFAULT_GROUPINGS_SHEET_ID)
-    parser.add_argument('-r', '--groupings-range',
-                        help='''Range of the Google Sheet that stores previous groupings.
-                                Defaults to '''+DEFAULT_GROUPINGS_RANGE,
-                        default=DEFAULT_GROUPINGS_RANGE)
+    parser.add_argument('-g', '--groups-sheet-id',
+                        help='''ID of the Google Sheet that stores previous groups.
+                                Defaults to '''+DEFAULT_GROUPS_SHEET_ID,
+                        default=DEFAULT_GROUPS_SHEET_ID)
+    parser.add_argument('-r', '--groups-range',
+                        help='''Range of the Google Sheet that stores previous groups.
+                                Defaults to '''+DEFAULT_GROUPS_RANGE,
+                        default=DEFAULT_GROUPS_RANGE)
     parser.add_argument('-n', '--group-size',
                         help='How large each random group should be. Defaults to '+str(DEFAULT_GROUP_SIZE),
                         default=DEFAULT_GROUP_SIZE)
@@ -133,20 +133,20 @@ def mealBot(args):
         print('You must have more than 1 student.')
         return
     
-    # Get previous groupings
-    groupings, sheet = getGroupings(credentials, args.groupings_sheet_id, args.groupings_range)
-    print(groupings)
+    # Get previous groups
+    prevGroups, sheet = getPrevGroups(credentials, args.groups_sheet_id, args.groups_range)
+    print(prevGroups)
     
     while True:
         # Divide into groups
         groups = chunk(personList, args.group_size)
         
-        # Check if all groups are not in groupings
+        # Check if all groups are not in prevGroups
         found = 0
         for grp in groups:
             if len(grp) == 1:
                 continue
-            if frozenset([person.name for person in grp]) in groupings:
+            if frozenset([person.name for person in grp]) in prevGroups:
                 found += 1
                 break
         if not found:
@@ -154,7 +154,7 @@ def mealBot(args):
         else:
             numCombinations = math.comb(len(personList), args.group_size)
             if numCombinations - found < len(personList)/args.group_size:
-                print('Not enough combinations left to avoid previous groupings.')
+                print('Not enough combinations left to avoid previous groups.')
                 break
     
     # Print the groups
@@ -175,7 +175,7 @@ def mealBot(args):
 
         # Save the groups
         print('Saving groups...')
-        saveGroups(groups, sheet, args.groupings_sheet_id, args.groupings_range)
+        saveGroups(groups, sheet, args.groups_sheet_id, args.groups_range)
         print('Groups saved!')
     else:
         print('Not sending emails.')
@@ -212,18 +212,18 @@ def chunk(l, n):
         groups.pop()
     return groups
 
-def getGroupings(credentials, spreadsheetId, range):
-    groupings = set()
+def getPrevGroups(credentials, spreadsheetId, range):
+    prevGroups = set()
     try:
         service = discovery.build('sheets', 'v4', credentials=credentials)
         sheet = service.spreadsheets()
         result = sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute()
         values = result.get('values', [])
         for row in values:
-            groupings.add(frozenset(row[1].split(', ')))
+            prevGroups.add(frozenset(row[1].split(', ')))
     except errors.HttpError as error:
         print('An error occurred: %s' % error)
-    return groupings, sheet
+    return prevGroups, sheet
 
 def saveGroups(groups, sheet, spreadsheetId, range):
     currRow = len(sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute().get('values', [])) + 2
