@@ -59,7 +59,7 @@ DEFAULT_GROUPS_SHEET_ID     = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
 DEFAULT_GROUPS_RANGE        = 'Sheet1!A2:B'
 DEFAULT_MESSAGE_FILE        = 'Message.txt'
 DEFAULT_BOT_EMAIL_ADDRESS   = 'YSC Mealbot <josh.chough@yale.edu>'
-DEFAULT_SUBJECT             = "[YSC MealBot] This week's meal group!"
+DEFAULT_SUBJECT             = "[YSC MealBot] {Week} | This week's meal group!"
 DEFAULT_CREDENTIALS_FILE    = 'client_secret.json'
 DEFAULT_TOKEN_FILE          = 'token.json'
 
@@ -231,15 +231,18 @@ def findGroups(students, prevGroups):
     
     return groups
 
-def getWeekString():
+def getWeekString(withNum=False):
     today = date.today()
     start = today - timedelta(days=today.weekday())
     end = start + timedelta(days=6)
-    return f"Week {start.strftime('%W')} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
+    if withNum:
+        return f"Week {start.strftime('%W')} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
+    else:
+        return f"{start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
 
 def saveGroups(groups, sheet, spreadsheetId, range):
     currRow = len(sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute().get('values', [])) + 2
-    week = getWeekString()
+    week = getWeekString(withNum=True)
     sheet.values().update(spreadsheetId=spreadsheetId, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
         'values': [[week, ', '.join([student.name for student in grp])] for grp in groups]
     }).execute()
@@ -312,6 +315,7 @@ def mealBot(args):
     # Print the email template
     print('\n ~~~~ EMAIL START ~~~~')
     print('\nFrom: {}'.format(args.email))
+    args.subject = args.subject.replace('{Week}', getWeekString())
     print('Subject: {}'.format(args.subject))
     print('\nBody:\n{}'.format(message))
     print('\n ~~~~ EMAIL END ~~~~')
