@@ -151,11 +151,11 @@ def getStudents(credentials, signupFormId):
     result = service.forms().responses().list(formId=signupFormId).execute()
     for response in result['responses']:
         students.append(Student({
-            'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'],
-            'lastname': response['answers'][LAST_NAME_QID]['textAnswers']['answers'][0]['value'],
+            'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'].strip(),
+            'lastname': response['answers'][LAST_NAME_QID]['textAnswers']['answers'][0]['value'].strip(),
             'year': response['answers'][YEAR_QID]['textAnswers']['answers'][0]['value'],
             'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
-            'email': response['respondentEmail']
+            'email': response['respondentEmail'].strip()
         }))
     print('Done')
     return students
@@ -325,7 +325,7 @@ def mealBot(args):
         print('Exiting...')
         return
 
-    sendEmails(groups, args.sender, args.subject, message, credentials)
+    sendEmails(groups, args.email, args.subject, message, credentials)
     print('Sending emails...Done')
 
     # Save the groups
