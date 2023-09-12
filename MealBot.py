@@ -73,7 +73,7 @@ class Student:
             self.name = self.firstname + ' ' + self.lastname
             self.email = d['email']
         except KeyError as err:
-            print('You must have a key for '+err.args[0]+' in your JSON file.')
+            print('Error: You must have a key for '+err.args[0]+' in your JSON file.')
             print(d)
             raise
 
@@ -123,7 +123,213 @@ def print_students(header, students):
     for student in students:
         print('\t{}'.format(student.name))
 
-def main():
+def getMessage(messageFilename):
+    print('Reading message file...', end='')
+    messageFile = open(messageFilename, 'r')
+    message = messageFile.read()
+    messageFile.close()
+    print('Done')
+    return message
+
+def getCredentials(credentialFilename, tokenFilename, user_agent):
+    print('Getting credentials...', end='')
+    store = file.Storage(tokenFilename)
+    credentials = store.get()
+    if not credentials or credentials.invalid:
+        flow = client.flow_from_clientsecrets(credentialFilename, SCOPES)
+        flow.user_agent = user_agent
+        credentials = tools.run_flow(flow, store)
+        print('Storing credentials to ' + tokenFilename)
+    print('Done')
+    return credentials
+
+def getStudents(credentials, signupFormId):
+    print('Getting students...', end='')
+    students = []
+    service = discovery.build('forms', 'v1', http=credentials.authorize(
+    Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
+    result = service.forms().responses().list(formId=signupFormId).execute()
+    for response in result['responses']:
+        students.append(Student({
+            'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'],
+            'lastname': response['answers'][LAST_NAME_QID]['textAnswers']['answers'][0]['value'],
+            'year': response['answers'][YEAR_QID]['textAnswers']['answers'][0]['value'],
+            'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
+            'email': response['respondentEmail']
+        }))
+    print('Done')
+    return students
+
+def getPrevGroups(credentials, spreadsheetId, range):
+    print('\nGetting previous groups...', end='')
+    prevGroups = set()
+    sheet = None
+    try:
+        service = discovery.build('sheets', 'v4', credentials=credentials)
+        sheet = service.spreadsheets()
+        result = sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute()
+        values = result.get('values', [])
+        for row in values:
+            prevGroups.add(frozenset(row[1].split(', ')))
+        print('Done')
+    except errors.HttpError as error:
+        print('Failed')
+        print('Error: %s' % error)
+    return prevGroups, sheet
+
+def findGroups(students, prevGroups):
+    # Randomize the list of students
+    print('\nShuffling students...', end='')
+    random.shuffle(students)
+    print('Done')
+
+    # Handle odd number of students
+    odd = False
+    odd_student = None
+    if len(students) % GROUP_SIZE == 1:
+        print('\nOdd number of students detected! Saving the odd student for later...', end='')
+        odd = True
+        odd_student = students.pop()
+        print('Done\n')
+
+    # Generate all possible combinations of groups
+    combinations = generate_combinations(students)
+    new_groups = filter_combinations(combinations, prevGroups)
+    print('Total new combinations: {}/{}'.format(len(new_groups), len(combinations)))
+
+    # Find the set of groups that maximizes the number of new groups
+    groups = []
+    participants = []
+    for i, ngrp in enumerate(new_groups):
+        temp_students = [student for student in ngrp]
+        temp_groups = [ngrp]
+        for j in range(i+1, len(new_groups)):
+            mgrp = new_groups[j]
+            if len(set(mgrp).intersection(set(temp_students))) == 0:
+                temp_students.extend(mgrp)
+                temp_groups.append(mgrp)
+        if len(temp_groups) > len(groups):
+            groups = temp_groups
+            participants = temp_students
+    print_groups('New groups', groups)
+
+    # Group the remaining students that were not in the optimal set of groups
+    if len(participants) != len(students):
+        remaining_students = [student for student in students if student not in participants]
+        print_students('Remaining students', remaining_students)
+        old = chunk(remaining_students)
+        print_groups('Old groups', old)
+        groups.extend(old)
+
+    groups = [list(grp) for grp in groups]
+
+    # Add the odd student to the first group
+    if odd:
+        print('\nAdding odd student ({}) to the first group...'.format(odd_student.name), end='')
+        groups[0].append(odd_student)
+        print('Done')
+    
+    return groups
+
+def getWeekString():
+    today = date.today()
+    start = today - timedelta(days=today.weekday())
+    end = start + timedelta(days=6)
+    return f"Week {start.strftime('%W')} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
+
+def saveGroups(groups, sheet, spreadsheetId, range):
+    currRow = len(sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute().get('values', [])) + 2
+    week = getWeekString()
+    sheet.values().update(spreadsheetId=spreadsheetId, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
+        'values': [[week, ', '.join([student.name for student in grp])] for grp in groups]
+    }).execute()
+
+def createMessage(toEmails, sender, subject, plaintext):
+    message = EmailMessage()
+
+    message.set_content(plaintext)
+    message['To'] = toEmails
+    message['From'] = sender
+    message['Subject'] = subject
+
+    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    body = {
+        'raw': encoded_message
+    }
+    return body
+
+def sendMessage(service, userID, message):
+    try:
+        message = (service.users().messages().send(userId=userID, body=message).execute())
+        return message
+    except errors.HttpError as error:
+        print('Error: %s' % error)
+
+def sendEmails(groups, sender, subject, rawBody, credentials):
+    http = credentials.authorize(httplib2.Http())
+    service = discovery.build('gmail', 'v1', http=http)
+    
+    groups = tqdm(groups, desc='Sending emails')
+    for grp in groups:
+        namesLst = [student.name for student in grp]
+        emailsLst = [student.email for student in grp]
+        body = rawBody.replace('{GroupList}', '\n'.join(namesLst))
+        emails = ', '.join(emailsLst)
+        message = createMessage(emails, sender, subject, body)
+        sendMessage(service, "me", message)
+
+def mealBot(args):
+    # Read the message file
+    message = getMessage(args.message_file)
+
+    # Get credentials
+    credentials = getCredentials(args.credentials_file, args.token_file, args.application_name)
+    
+    # Get a list of students
+    students = getStudents(credentials, args.signup_form_id)
+    print_students('Students', students)
+    
+    if len(students) == 1:
+        print('Error: You must have more than 1 student.')
+        return
+    
+    # Get previous groups
+    prevGroups, sheet = getPrevGroups(credentials, args.groups_sheet_id, args.groups_range)
+    if sheet is None:
+        print('Error: Could not get previous groups.')
+        return
+    print_groups('Previous groups', prevGroups)
+    
+    # Find optimal groups
+    groups = findGroups(students, prevGroups)
+    print_groups('Final groups', groups, emails=True)
+
+    # Confirm groups?
+    if input('\nContinue? (Y/n)\n> ').lower() != 'y':
+        print('Exiting...')
+        return
+
+    # Print the email template
+    print('\n ~~~~ EMAIL START ~~~~')
+    print('\nFrom: {}'.format(args.email))
+    print('Subject: {}'.format(args.subject))
+    print('\nBody:\n{}'.format(message))
+    print('\n ~~~~ EMAIL END ~~~~')
+    
+    # Send email?
+    if input('\nSend emails? (Y/n)\n> ').lower() != 'y':
+        print('Exiting...')
+        return
+
+    sendEmails(groups, args.sender, args.subject, message, credentials)
+    print('Sending emails...Done')
+
+    # Save the groups
+    print('Saving groups...', end='')
+    saveGroups(groups, sheet, args.groups_sheet_id, args.groups_range)
+    print('Done')
+
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
                                                     send an email to each group to inform them.''')
     parser.add_argument('-a', '--application-name',
@@ -160,203 +366,5 @@ def main():
                                 with the list of students in the group). Defaults to '''+DEFAULT_MESSAGE_FILE,
                         default=DEFAULT_MESSAGE_FILE)
     args = parser.parse_args()
+
     mealBot(args)
-
-def mealBot(args):
-    # Read the message file
-    print('Reading message file...', end='')
-    messageFile = open(args.message_file, 'r')
-    message = messageFile.read()
-    messageFile.close()
-    print('Done')
-
-    # Get credentials
-    credentials = getCredentials(args.credentials_file, args.token_file, args.application_name)
-    
-    # Get a list of students
-    students = getStudents(credentials, args.signup_form_id)
-    print_students('Students', students)
-    print()
-    
-    if len(students) == 1:
-        print('Error: You must have more than 1 student.')
-        return
-    
-    # Get previous groups
-    prevGroups, sheet = getPrevGroups(credentials, args.groups_sheet_id, args.groups_range)
-    if sheet is None:
-        print('Error: Could not get previous groups.')
-        return
-    print_groups('Previous groups', prevGroups)
-    
-    # Randomize the list of students
-    print('\nShuffling students...', end='')
-    random.shuffle(students)
-    print('Done')
-
-    # Handle odd number of students
-    odd = False
-    odd_student = None
-    if len(students) % GROUP_SIZE == 1:
-        print('\nOdd number of students detected! Saving the odd student for later...', end='')
-        odd = True
-        odd_student = students.pop()
-        print('Done\n')
-
-    # Generate all possible combinations of groups
-    combinations = generate_combinations(students)
-    new_groups = filter_combinations(combinations, prevGroups)
-    print('Total new combinations: {}/{}'.format(len(new_groups), len(combinations)))
-
-    # Find the set of groups that maximizes the number of new groups
-    groups = []
-    participants = []
-    for i, ngrp in enumerate(new_groups):
-        temp_students = [student for student in ngrp]
-        temp_groups = [ngrp]
-        for j in range(i+1, len(new_groups)):
-            mgrp = new_groups[j]
-            if len(set(mgrp).intersection(set(temp_students))) == 0:
-                temp_students.extend(mgrp)
-                temp_groups.append(mgrp)
-        if len(temp_groups) > len(groups):
-            groups = temp_groups
-            participants = temp_students
-    print_groups('New groups', groups)
-
-    if len(participants) != len(students):
-        remaining_students = [student for student in students if student not in participants]
-        print_students('Remaining students', remaining_students)
-        old = chunk(remaining_students)
-        print_groups('Old groups', old)
-        groups.extend(old)
-
-    groups = [list(grp) for grp in groups]
-
-    # Add the odd student to the first group
-    if odd:
-        print('\nAdding odd student ({}) to the first group...'.format(odd_student.name), end='')
-        groups[0].append(odd_student)
-        print('Done')
-    
-    # Print the groups
-    print_groups('Final groups', groups, emails=True)
-
-    if input('\nContinue? (Y/n)\n> ').lower() != 'y':
-        print('Exiting...')
-        return
-
-    print('\n ~~~~ EMAIL START ~~~~')
-    print('\nFrom: {}'.format(args.email))
-    print('Subject: {}'.format(args.subject))
-    print('\nBody:\n{}'.format(message))
-    print('\n ~~~~ EMAIL END ~~~~')
-    
-    # Send email?
-    if input('\nSend emails? (Y/n)\n> ').lower() == 'y':
-        print('Sending emails...')
-        sendEmails(groups, args.sender, args.subject, message, credentials)
-        print('Emails away!')
-
-        # Save the groups
-        print('Saving groups...')
-        saveGroups(groups, sheet, args.groups_sheet_id, args.groups_range)
-        print('Groups saved!')
-    else:
-        print('Not sending emails.')
-
-def getStudents(credentials, signupFormId):
-    print('Getting students...', end='')
-    students = []
-    service = discovery.build('forms', 'v1', http=credentials.authorize(
-    Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
-    result = service.forms().responses().list(formId=signupFormId).execute()
-    for response in result['responses']:
-        students.append(Student({
-            'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'],
-            'lastname': response['answers'][LAST_NAME_QID]['textAnswers']['answers'][0]['value'],
-            'year': response['answers'][YEAR_QID]['textAnswers']['answers'][0]['value'],
-            'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
-            'email': response['respondentEmail']
-        }))
-    print('Done')
-    return students
-
-def getPrevGroups(credentials, spreadsheetId, range):
-    print('Getting previous groups...', end='')
-    prevGroups = set()
-    sheet = None
-    try:
-        service = discovery.build('sheets', 'v4', credentials=credentials)
-        sheet = service.spreadsheets()
-        result = sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute()
-        values = result.get('values', [])
-        for row in values:
-            prevGroups.add(frozenset(row[1].split(', ')))
-        print('Done')
-    except errors.HttpError as error:
-        print('Failed')
-        print('Error: %s' % error)
-    return prevGroups, sheet
-
-def saveGroups(groups, sheet, spreadsheetId, range):
-    currRow = len(sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute().get('values', [])) + 2
-    week = getWeekString()
-    sheet.values().update(spreadsheetId=spreadsheetId, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
-        'values': [[week, ', '.join([student.name for student in grp])] for grp in groups]
-    }).execute()
-
-def getWeekString():
-    today = date.today()
-    start = today - timedelta(days=today.weekday())
-    end = start + timedelta(days=6)
-    return f"Week {start.strftime('%W')} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
-
-def sendEmails(groups, sender, subject, rawBody, credentials):
-    http = credentials.authorize(httplib2.Http())
-    service = discovery.build('gmail', 'v1', http=http)
-    
-    groups = tqdm(groups, desc='Sending emails')
-    for grp in groups:
-        namesLst = [student.name for student in grp]
-        emailsLst = [student.email for student in grp]
-        body = rawBody.replace('{GroupList}', '\n'.join(namesLst))
-        emails = ', '.join(emailsLst)
-        message = createMessage(emails, sender, subject, body)
-        sendMessage(service, "me", message)
-
-def createMessage(toEmails, sender, subject, plaintext):
-    message = EmailMessage()
-
-    message.set_content(plaintext)
-    message['To'] = toEmails
-    message['From'] = sender
-    message['Subject'] = subject
-
-    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-    body = {
-        'raw': encoded_message
-    }
-    return body
-
-def getCredentials(credentialFilename, tokenFilename, user_agent):
-    print('Getting credentials...', end='')
-    store = file.Storage(tokenFilename)
-    credentials = store.get()
-    if not credentials or credentials.invalid:
-        flow = client.flow_from_clientsecrets(credentialFilename, SCOPES)
-        flow.user_agent = user_agent
-        credentials = tools.run_flow(flow, store)
-        print('Storing credentials to ' + tokenFilename)
-    print('Done')
-    return credentials
-
-def sendMessage(service, userID, message):
-    try:
-        message = (service.users().messages().send(userId=userID, body=message).execute())
-        return message
-    except errors.HttpError as error:
-        print('Error: %s' % error)
-
-if __name__ == '__main__':
-    main()
