@@ -49,6 +49,7 @@ FIRST_NAME_QID = '76e2ebcf'
 LAST_NAME_QID = '3b64eca4'
 YEAR_QID = '32825110'
 COLLEGE_QID = '555d65c7'
+GROUP_SIZE = 2
 
 # Defaults - can be overridden with arguments.
 DEFAULT_APPLICATION_NAME    = 'YSC MEALBOT'
@@ -56,7 +57,6 @@ DEFAULT_SIGNUP_FORM_ID      = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
 DEFAULT_GROUPS_SHEET_ID     = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
 DEFAULT_GROUPS_RANGE        = 'Sheet1!A2:B'
 DEFAULT_MESSAGE_FILE        = 'Message.txt'
-DEFAULT_GROUP_SIZE          = 2
 DEFAULT_BOT_EMAIL_ADDRESS   = 'YSC Mealbot <josh.chough@yale.edu>'
 DEFAULT_SUBJECT             = "[YSC MealBot] This week's meal group!"
 DEFAULT_CREDENTIALS_FILE    = 'client_secret.json'
@@ -77,8 +77,8 @@ class Student:
             raise
 
 # Function to generate all possible combinations of k-groups from a list of students
-def generate_combinations(students, k):
-    return list(itertools.combinations(students, k))
+def generate_combinations(students):
+    return list(itertools.combinations(students, GROUP_SIZE))
 
 # Function to filter out combinations that have been used before
 def filter_combinations(combinations, prevGroups):
@@ -91,9 +91,9 @@ def filter_combinations(combinations, prevGroups):
 # Breaks the list l into chunks of size n. Assume that len(l) % n == 0.
 # Returns a list of lists.
 # EX. l = [0, 1, 2, 3]; n = 2. Returns [[0, 1], [2, 3]]
-def chunk(l, n):
+def chunk(l):
     # First break into chunks. Groups is a list of list of Students
-    n = max(1, n)
+    n = max(1, GROUP_SIZE)
     groups = [l[i:i + n] for i in range(0, len(l), n)]
     return groups
 
@@ -123,9 +123,6 @@ def main():
                         help='''Range of the Google Sheet that stores previous groups.
                                 Defaults to '''+DEFAULT_GROUPS_RANGE,
                         default=DEFAULT_GROUPS_RANGE)
-    parser.add_argument('-n', '--group-size',
-                        help='How large each random group should be. Defaults to '+str(DEFAULT_GROUP_SIZE),
-                        default=DEFAULT_GROUP_SIZE)
     parser.add_argument('-e', '--email',
                         help='Gmail address from which to send emails. Defaults to '+DEFAULT_BOT_EMAIL_ADDRESS,
                         default=DEFAULT_BOT_EMAIL_ADDRESS)
@@ -161,7 +158,7 @@ def mealBot(args):
     random.shuffle(students)
 
     # Generate all possible combinations of groups
-    combinations = generate_combinations(students, args.group_size)
+    combinations = generate_combinations(students)
     print('Total combinations:', len(combinations))
     new_groups = filter_combinations(combinations, prevGroups)
     print('Total new combinations:', len(new_groups))
@@ -188,7 +185,7 @@ def mealBot(args):
     if len(participants) != len(students):
         remaining_students = [student for student in students if student not in participants]
         print('Remaining students:', remaining_students)
-        old = chunk(remaining_students, args.group_size)
+        old = chunk(remaining_students)
         print('Old groups reused:', old)
         groups.extend(old)
     
