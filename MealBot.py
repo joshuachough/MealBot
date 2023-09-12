@@ -175,6 +175,8 @@ def mealBot(args):
     
     # Get a list of students
     students = getStudents(credentials, args.signup_form_id)
+    print_students('Students', students)
+    print()
     
     if len(students) == 1:
         print('Error: You must have more than 1 student.')
@@ -191,6 +193,15 @@ def mealBot(args):
     print('\nShuffling students...', end='')
     random.shuffle(students)
     print('Done')
+
+    # Handle odd number of students
+    odd = False
+    odd_student = None
+    if len(students) % GROUP_SIZE == 1:
+        print('\nOdd number of students detected! Saving the odd student for later...', end='')
+        odd = True
+        odd_student = students.pop()
+        print('Done\n')
 
     # Generate all possible combinations of groups
     combinations = generate_combinations(students)
@@ -219,6 +230,14 @@ def mealBot(args):
         old = chunk(remaining_students)
         print_groups('Old groups', old)
         groups.extend(old)
+
+    groups = [list(grp) for grp in groups]
+
+    # Add the odd student to the first group
+    if odd:
+        print('\nAdding odd student ({}) to the first group...'.format(odd_student.name), end='')
+        groups[0].append(odd_student)
+        print('Done')
     
     # Print the groups
     print_groups('Final groups', groups, emails=True)
