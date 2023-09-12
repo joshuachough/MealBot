@@ -36,6 +36,7 @@ import random
 import argparse
 import httplib2
 import itertools
+from tqdm import tqdm
 from datetime import date, timedelta
 from httplib2 import Http
 from oauth2client import client, tools, file
@@ -78,14 +79,19 @@ class Student:
 
 # Function to generate all possible combinations of k-groups from a list of students
 def generate_combinations(students):
-    return list(itertools.combinations(students, GROUP_SIZE))
+    print('Generating all possible combinations...', end='')
+    combinations = list(itertools.combinations(students, GROUP_SIZE))
+    print('Done')
+    return combinations
 
 # Function to filter out combinations that have been used before
 def filter_combinations(combinations, prevGroups):
+    print('Filtering out previously used combinations...', end='')
     new_groups = []
     for grp in combinations:
         if frozenset([student.name for student in grp]) not in prevGroups:
             new_groups.append(grp)
+    print('Done')
     return new_groups
 
 # Breaks the list l into chunks of size n. Assume that len(l) % n == 0.
@@ -96,6 +102,26 @@ def chunk(l):
     n = max(1, GROUP_SIZE)
     groups = [l[i:i + n] for i in range(0, len(l), n)]
     return groups
+
+def print_header(header, length):
+    if length == 0:
+        print('\n{}: None'.format(header))
+        return
+    else:
+        print('\n{} [{}]:'.format(header, length))
+
+def print_groups(header, groups, emails=False):
+    print_header(header, len(groups))
+    for grp in groups:
+        if emails:
+            print('\t{}'.format(', '.join(['{} ({})'.format(student.name, student.email) for student in grp])))
+        else:
+            print('\t{}'.format(', '.join([student.name for student in grp])))
+
+def print_students(header, students):
+    print_header(header, len(students))
+    for student in students:
+        print('\t{}'.format(student.name))
 
 def main():
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
@@ -137,34 +163,41 @@ def main():
     mealBot(args)
 
 def mealBot(args):
+    # Read the message file
+    print('Reading message file...', end='')
     messageFile = open(args.message_file, 'r')
     message = messageFile.read()
     messageFile.close()
+    print('Done')
 
+    # Get credentials
     credentials = getCredentials(args.credentials_file, args.token_file, args.application_name)
     
     # Get a list of students
     students = getStudents(credentials, args.signup_form_id)
     
     if len(students) == 1:
-        print('You must have more than 1 student.')
+        print('Error: You must have more than 1 student.')
         return
     
     # Get previous groups
     prevGroups, sheet = getPrevGroups(credentials, args.groups_sheet_id, args.groups_range)
-    print(prevGroups)
+    if sheet is None:
+        print('Error: Could not get previous groups.')
+        return
+    print_groups('Previous groups', prevGroups)
     
     # Randomize the list of students
+    print('\nShuffling students...', end='')
     random.shuffle(students)
+    print('Done')
 
     # Generate all possible combinations of groups
     combinations = generate_combinations(students)
-    print('Total combinations:', len(combinations))
     new_groups = filter_combinations(combinations, prevGroups)
-    print('Total new combinations:', len(new_groups))
+    print('Total new combinations: {}/{}'.format(len(new_groups), len(combinations)))
 
     # Find the set of groups that maximizes the number of new groups
-    max_new_groups = 0
     groups = []
     participants = []
     for i, ngrp in enumerate(new_groups):
@@ -175,32 +208,33 @@ def mealBot(args):
             if len(set(mgrp).intersection(set(temp_students))) == 0:
                 temp_students.extend(mgrp)
                 temp_groups.append(mgrp)
-        if len(temp_groups) > max_new_groups:
-            max_new_groups = len(temp_groups)
+        if len(temp_groups) > len(groups):
             groups = temp_groups
             participants = temp_students
-    print('Max new groups found:', max_new_groups)
-    print('New groups:', groups)
+    print_groups('New groups', groups)
 
     if len(participants) != len(students):
         remaining_students = [student for student in students if student not in participants]
-        print('Remaining students:', remaining_students)
+        print_students('Remaining students', remaining_students)
         old = chunk(remaining_students)
-        print('Old groups reused:', old)
+        print_groups('Old groups', old)
         groups.extend(old)
     
     # Print the groups
-    print('Randomized groups:\n')
-    for grp in groups:
-        for student in grp:
-            print(student.name, student.email, sep='\t')
-        print()
-    
-    print('Subject: '+args.subject)
-    print('\nBody:\n'+message)
+    print_groups('Final groups', groups, emails=True)
+
+    if input('\nContinue? (Y/n)\n> ').lower() != 'y':
+        print('Exiting...')
+        return
+
+    print('\n ~~~~ EMAIL START ~~~~')
+    print('\nFrom: {}'.format(args.email))
+    print('Subject: {}'.format(args.subject))
+    print('\nBody:\n{}'.format(message))
+    print('\n ~~~~ EMAIL END ~~~~')
     
     # Send email?
-    if input('Send emails? (Y/n) =>').lower() == 'y':
+    if input('\nSend emails? (Y/n)\n> ').lower() == 'y':
         print('Sending emails...')
         sendEmails(groups, args.sender, args.subject, message, credentials)
         print('Emails away!')
@@ -213,6 +247,7 @@ def mealBot(args):
         print('Not sending emails.')
 
 def getStudents(credentials, signupFormId):
+    print('Getting students...', end='')
     students = []
     service = discovery.build('forms', 'v1', http=credentials.authorize(
     Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
@@ -225,10 +260,13 @@ def getStudents(credentials, signupFormId):
             'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
             'email': response['respondentEmail']
         }))
+    print('Done')
     return students
 
 def getPrevGroups(credentials, spreadsheetId, range):
+    print('Getting previous groups...', end='')
     prevGroups = set()
+    sheet = None
     try:
         service = discovery.build('sheets', 'v4', credentials=credentials)
         sheet = service.spreadsheets()
@@ -236,8 +274,10 @@ def getPrevGroups(credentials, spreadsheetId, range):
         values = result.get('values', [])
         for row in values:
             prevGroups.add(frozenset(row[1].split(', ')))
+        print('Done')
     except errors.HttpError as error:
-        print('An error occurred: %s' % error)
+        print('Failed')
+        print('Error: %s' % error)
     return prevGroups, sheet
 
 def saveGroups(groups, sheet, spreadsheetId, range):
@@ -257,6 +297,7 @@ def sendEmails(groups, sender, subject, rawBody, credentials):
     http = credentials.authorize(httplib2.Http())
     service = discovery.build('gmail', 'v1', http=http)
     
+    groups = tqdm(groups, desc='Sending emails')
     for grp in groups:
         namesLst = [student.name for student in grp]
         emailsLst = [student.email for student in grp]
@@ -280,6 +321,7 @@ def createMessage(toEmails, sender, subject, plaintext):
     return body
 
 def getCredentials(credentialFilename, tokenFilename, user_agent):
+    print('Getting credentials...', end='')
     store = file.Storage(tokenFilename)
     credentials = store.get()
     if not credentials or credentials.invalid:
@@ -287,6 +329,7 @@ def getCredentials(credentialFilename, tokenFilename, user_agent):
         flow.user_agent = user_agent
         credentials = tools.run_flow(flow, store)
         print('Storing credentials to ' + tokenFilename)
+    print('Done')
     return credentials
 
 def sendMessage(service, userID, message):
@@ -294,7 +337,7 @@ def sendMessage(service, userID, message):
         message = (service.users().messages().send(userId=userID, body=message).execute())
         return message
     except errors.HttpError as error:
-        print('An error occurred: %s' % error)
+        print('Error: %s' % error)
 
 if __name__ == '__main__':
     main()
