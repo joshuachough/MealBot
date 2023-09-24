@@ -110,10 +110,12 @@ def print_header(header, length):
     else:
         print('\n{} [{}]:'.format(header, length))
 
-def print_groups(header, groups, emails=False):
+def print_groups(header, groups, student=True, emails=False):
     print_header(header, len(groups))
     for grp in groups:
-        if emails:
+        if not student:
+            print('\t{}'.format(', '.join([name for name in grp])))
+        elif emails:
             print('\t{}'.format(', '.join(['{} ({})'.format(student.name, student.email) for student in grp])))
         else:
             print('\t{}'.format(', '.join([student.name for student in grp])))
@@ -301,7 +303,7 @@ def mealBot(args):
     if sheet is None:
         print('Error: Could not get previous groups.')
         return
-    print_groups('Previous groups', prevGroups)
+    print_groups('Previous groups', prevGroups, student=False)
     
     # Find optimal groups
     groups = findGroups(students, prevGroups)
