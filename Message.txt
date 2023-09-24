@@ -1,12 +1,13 @@
 Beep boop!
-This is the YSC Meal Bot, randomly grouping you together to get a meal sometime this week.
+This is the YSC Meal Bot, randomly grouping you together to get a meal sometime in the next two weeks.
 
-Your random group this week is:
+Your random pairing is:
 {GroupList}
 
 1. INITIATE!!!
 2. Schedule a meal with that person
 3. Have great conversation and fellowship :)
-4. Repeat next week!
+4. TAKE A SELFIE WITH YOUR MEAL PARTNER AND SEND IT TO kwaku.acquah@yale.edu!!! (we want to create a collage of your beautiful faces)
+5. Repeat in 2 weeks!
 
 "Dear friends, let us love one another, for love comes from God. Everyone who loves has been born of God and knows God" (1 John 4:7).
