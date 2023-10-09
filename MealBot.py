@@ -181,10 +181,10 @@ def getPrevGroups(credentials, spreadsheetId, range):
         print('Error: %s' % error)
     return prevGroups, sheet
 
-def findGroups(students, prevGroups, custom_groupings):
+def findGroups(students, prevGroups, customGroupings):
     groups = []
 
-    if custom_groupings:
+    if customGroupings:
         numGroups = len(students)/2
         odd = True if len(students) % GROUP_SIZE == 1 else True
         if odd:
@@ -273,9 +273,11 @@ def findGroups(students, prevGroups, custom_groupings):
     
     return groups
 
-def getBiWeeklyString(withNum=False):
+def getBiWeeklyString(thisWeek=False, withNum=False):
     today = date.today()
     start = today + timedelta(days=(6 - today.weekday()))
+    if thisWeek:
+        start = start - timedelta(days=7)
     end = start + timedelta(days=13)
     monday = start + timedelta(days=1)
     if withNum:
@@ -283,9 +285,9 @@ def getBiWeeklyString(withNum=False):
     else:
         return f"{start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
 
-def saveGroups(groups, sheet, spreadsheetId, range):
+def saveGroups(groups, sheet, spreadsheetId, range, thisWeek):
     currRow = len(sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute().get('values', [])) + 2
-    week = getBiWeeklyString(withNum=True)
+    week = getBiWeeklyString(thisWeek, withNum=True)
     sheet.values().update(spreadsheetId=spreadsheetId, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
         'values': [[week, ', '.join([student.name for student in grp])] for grp in groups]
     }).execute()
@@ -358,7 +360,7 @@ def mealBot(args):
     # Print the email template
     print('\n ~~~~ EMAIL START ~~~~')
     print('\nFrom: {}'.format(args.email))
-    args.subject = args.subject.replace('{BiWeek}', getBiWeeklyString())
+    args.subject = args.subject.replace('{BiWeek}', getBiWeeklyString(args.this_week_group))
     print('Subject: {}'.format(args.subject))
     print('\nBody:\n{}'.format(message))
     print('\n ~~~~ EMAIL END ~~~~')
@@ -373,7 +375,7 @@ def mealBot(args):
 
     # Save the groups
     print('Saving groups...', end='')
-    saveGroups(groups, sheet, args.groups_sheet_id, args.groups_range)
+    saveGroups(groups, sheet, args.groups_sheet_id, args.groups_range, args.this_week_group)
     print('Done')
 
 if __name__ == '__main__':
@@ -413,10 +415,18 @@ if __name__ == '__main__':
                                 with the list of students in the group). Defaults to '''+DEFAULT_MESSAGE_FILE,
                         default=DEFAULT_MESSAGE_FILE)
     parser.add_argument('--custom-groupings',
+                        help='''Use custom groupings instead of random groupings. Defaults to False.''',
                         default=False, const=True,
                         type=str2bool,
-                        help='''Use custom groupings instead of random groupings. Defaults to False.''',
                         nargs='?')
+    parser.add_argument('--this-week-group',
+                        help='''Send emails for this week group instead of next week group. A week group is the
+                                group of weeks that MealBot sends out groupings (i.e. every 1 week, 2 weeks,
+                                3 weeks, etc). Defaults to False.''',
+                        default=False, const=True,
+                        type=str2bool,
+                        nargs='?')
+
     args = parser.parse_args()
 
     mealBot(args)
