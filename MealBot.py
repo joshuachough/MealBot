@@ -44,6 +44,8 @@ import base64
 from email.message import EmailMessage
 from apiclient import errors, discovery
 
+from utils import *
+
 SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly', 'https://www.googleapis.com/auth/spreadsheets']
 DISCOVERY_DOC = 'https://forms.googleapis.com/$discovery/rest?version=v1'
 FIRST_NAME_QID = '76e2ebcf'
@@ -179,57 +181,95 @@ def getPrevGroups(credentials, spreadsheetId, range):
         print('Error: %s' % error)
     return prevGroups, sheet
 
-def findGroups(students, prevGroups):
-    # Randomize the list of students
-    print('\nShuffling students...', end='')
-    random.shuffle(students)
-    print('Done')
-
-    # Handle odd number of students
-    odd = False
-    odd_student = None
-    if len(students) % GROUP_SIZE == 1:
-        print('\nOdd number of students detected! Saving the odd student for later...', end='')
-        odd = True
-        odd_student = students.pop()
-        print('Done\n')
-
-    # Generate all possible combinations of groups
-    combinations = generate_combinations(students)
-    new_groups = filter_combinations(combinations, prevGroups)
-    print('Total new combinations: {}/{}'.format(len(new_groups), len(combinations)))
-
-    # Find the set of groups that maximizes the number of new groups
+def findGroups(students, prevGroups, custom_groupings):
     groups = []
-    participants = []
-    for i, ngrp in enumerate(new_groups):
-        temp_students = [student for student in ngrp]
-        temp_groups = [ngrp]
-        for j in range(i+1, len(new_groups)):
-            mgrp = new_groups[j]
-            if len(set(mgrp).intersection(set(temp_students))) == 0:
-                temp_students.extend(mgrp)
-                temp_groups.append(mgrp)
-        if len(temp_groups) > len(groups):
-            groups = temp_groups
-            participants = temp_students
-    print_groups('New groups', groups)
 
-    # Group the remaining students that were not in the optimal set of groups
-    if len(participants) != len(students):
-        remaining_students = [student for student in students if student not in participants]
-        print_students('Remaining students', remaining_students)
-        old = chunk(remaining_students)
-        print_groups('Old groups', old)
-        groups.extend(old)
+    if custom_groupings:
+        numGroups = len(students)/2
+        odd = True if len(students) % GROUP_SIZE == 1 else True
+        if odd:
+            print('\nYou will need to enter {} groups of {} students each and 1 group of {} students.'.format(numGroups-1, GROUP_SIZE, GROUP_SIZE+1))
+        else:
+            print('\nYou will need to enter {} groups of {} students each.'.format(numGroups, GROUP_SIZE))
 
-    groups = [list(grp) for grp in groups]
+        # Get custom groupings from file
+        customGroupingsFile = open(input('\nWhich custom groupings file would you like to use?\n > ', end=''), 'r')
+        customGroupings = customGroupingsFile.read().splitlines()
+        customGroupingsFile.close()
 
-    # Add the odd student to the first group
-    if odd:
-        print('\nAdding odd student ({}) to the first group...'.format(odd_student.name), end='')
-        groups[0].append(odd_student)
+        while (len(customGroupings) > 0):
+            # Get next group
+            group = customGroupings.pop(0).split(',')
+            group = [student for student in students if student.name in group]
+            if group[0].name == group[1].name:
+                print('Error: You cannot have the same student in a group twice.')
+                continue
+            if len(group) < GROUP_SIZE:
+                print('Error: You must have at least {} students in a group.'.format(GROUP_SIZE))
+                continue
+            for g in groups:
+                if len(set(g).intersection(set(group))) > 0:
+                    print('Error: You cannot have the same student ({}) in multiple groups.'.format(g[0].name))
+                    continue
+            groups.append(group)
+
+        if (len(groups) != numGroups):
+            print('Error: You must have {} groups of students.'.format(numGroups))
+            exit()
+        numStudents = sum([len(group) for group in groups])
+        if (numStudents != len(students)):
+            print('Error: You must have {} students in total.'.format(len(students)))
+            exit()
+    else:
+        # Randomize the list of students
+        print('\nShuffling students...', end='')
+        random.shuffle(students)
         print('Done')
+
+        # Handle odd number of students
+        odd = False
+        odd_student = None
+        if len(students) % GROUP_SIZE == 1:
+            print('\nOdd number of students detected! Saving the odd student for later...', end='')
+            odd = True
+            odd_student = students.pop()
+            print('Done\n')
+
+        # Generate all possible combinations of groups
+        combinations = generate_combinations(students)
+        new_groups = filter_combinations(combinations, prevGroups)
+        print('Total new combinations: {}/{}'.format(len(new_groups), len(combinations)))
+
+        # Find the set of groups that maximizes the number of new groups
+        participants = []
+        for i, ngrp in enumerate(new_groups):
+            temp_students = [student for student in ngrp]
+            temp_groups = [ngrp]
+            for j in range(i+1, len(new_groups)):
+                mgrp = new_groups[j]
+                if len(set(mgrp).intersection(set(temp_students))) == 0:
+                    temp_students.extend(mgrp)
+                    temp_groups.append(mgrp)
+            if len(temp_groups) > len(groups):
+                groups = temp_groups
+                participants = temp_students
+        print_groups('New groups', groups)
+
+        # Group the remaining students that were not in the optimal set of groups
+        if len(participants) != len(students):
+            remaining_students = [student for student in students if student not in participants]
+            print_students('Remaining students', remaining_students)
+            old = chunk(remaining_students)
+            print_groups('Old groups', old)
+            groups.extend(old)
+
+        groups = [list(grp) for grp in groups]
+
+        # Add the odd student to the first group
+        if odd:
+            print('\nAdding odd student ({}) to the first group...'.format(odd_student.name), end='')
+            groups[0].append(odd_student)
+            print('Done')
     
     return groups
 
@@ -307,7 +347,7 @@ def mealBot(args):
     print_groups('Previous groups', prevGroups, student=False)
     
     # Find optimal groups
-    groups = findGroups(students, prevGroups)
+    groups = findGroups(students, prevGroups, args.custom_groupings)
     print_groups('Final groups', groups, emails=True)
 
     # Confirm groups?
@@ -372,6 +412,11 @@ if __name__ == '__main__':
                         help='''File containing the email body ({GroupList} in the file will be replaced 
                                 with the list of students in the group). Defaults to '''+DEFAULT_MESSAGE_FILE,
                         default=DEFAULT_MESSAGE_FILE)
+    parser.add_argument('--custom-groupings',
+                        default=False, const=True,
+                        type=str2bool,
+                        help='''Use custom groupings instead of random groupings. Defaults to False.''',
+                        nargs='?')
     args = parser.parse_args()
 
     mealBot(args)
