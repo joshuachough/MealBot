@@ -273,21 +273,21 @@ def findGroups(students, prevGroups, customGroupings):
     
     return groups
 
-def getBiWeeklyString(thisWeek=False, withNum=False):
+def getWeekString(n, thisWeek=False, withNums=False):
     today = date.today()
     start = today + timedelta(days=(6 - today.weekday()))
     if thisWeek:
         start = start - timedelta(days=7)
-    end = start + timedelta(days=13)
+    weekGroupLength = 7 * n - 1
+    end = start + timedelta(days=weekGroupLength)
     monday = start + timedelta(days=1)
-    if withNum:
+    if withNums:
         return f"Week {monday.strftime('%W')} & {int(monday.strftime('%W'))+1} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
     else:
         return f"{start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
 
-def saveGroups(groups, sheet, spreadsheetId, range, thisWeek):
+def saveGroups(groups, sheet, spreadsheetId, range, week):
     currRow = len(sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute().get('values', [])) + 2
-    week = getBiWeeklyString(thisWeek, withNum=True)
     sheet.values().update(spreadsheetId=spreadsheetId, range=f"Sheet1!A{currRow}:B", valueInputOption='USER_ENTERED', body={
         'values': [[week, ', '.join([student.name for student in grp])] for grp in groups]
     }).execute()
@@ -356,11 +356,14 @@ def mealBot(args):
     if input('\nContinue? (Y/n)\n> ').lower() != 'y':
         print('Exiting...')
         return
+    
+    # Get the week string
+    week = getWeekString(args.week_group_frequency, args.this_week_group)
 
     # Print the email template
     print('\n ~~~~ EMAIL START ~~~~')
     print('\nFrom: {}'.format(args.email))
-    args.subject = args.subject.replace('{BiWeek}', getBiWeeklyString(args.this_week_group))
+    args.subject = args.subject.replace('{BiWeek}', week)
     print('Subject: {}'.format(args.subject))
     print('\nBody:\n{}'.format(message))
     print('\n ~~~~ EMAIL END ~~~~')
@@ -375,7 +378,8 @@ def mealBot(args):
 
     # Save the groups
     print('Saving groups...', end='')
-    saveGroups(groups, sheet, args.groups_sheet_id, args.groups_range, args.this_week_group)
+    week = getWeekString(args.week_group_frequency, args.this_week_group, withNums=True)
+    saveGroups(groups, sheet, args.groups_sheet_id, args.groups_range, week)
     print('Done')
 
 if __name__ == '__main__':
@@ -426,6 +430,11 @@ if __name__ == '__main__':
                         default=False, const=True,
                         type=str2bool,
                         nargs='?')
+    parser.add_argument('--week-group-frequency',
+                        help='''Frequency of week groups (1-52). Defaults to 2 (i.e. every other week).''',
+                        default=2,
+                        type=int,
+                        choices=range(1, 53))
 
     args = parser.parse_args()
 
