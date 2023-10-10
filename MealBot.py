@@ -186,26 +186,27 @@ def findGroups(students, prevGroups, customGroupings):
 
     if customGroupings:
         numGroups = len(students)/2
-        odd = True if len(students) % GROUP_SIZE == 1 else True
+        odd = True if len(students) % GROUP_SIZE == 1 else False
         if odd:
             print('\nYou will need to enter {} groups of {} students each and 1 group of {} students.'.format(numGroups-1, GROUP_SIZE, GROUP_SIZE+1))
         else:
             print('\nYou will need to enter {} groups of {} students each.'.format(numGroups, GROUP_SIZE))
 
         # Get custom groupings from file
-        customGroupingsFile = open(input('\nWhich custom groupings file would you like to use?\n > ', end=''), 'r')
+        customGroupingsFile = open(input('\nWhich custom groupings file would you like to use?\n > '), 'r')
         customGroupings = customGroupingsFile.read().splitlines()
         customGroupingsFile.close()
 
         while (len(customGroupings) > 0):
             # Get next group
-            group = customGroupings.pop(0).split(',')
+            group = customGroupings.pop(0).split(', ')
+            group = [name.strip() for name in group]
             group = [student for student in students if student.name in group]
-            if group[0].name == group[1].name:
-                print('Error: You cannot have the same student in a group twice.')
-                continue
             if len(group) < GROUP_SIZE:
                 print('Error: You must have at least {} students in a group.'.format(GROUP_SIZE))
+                continue
+            if group[0].name == group[1].name:
+                print('Error: You cannot have the same student in a group twice.')
                 continue
             for g in groups:
                 if len(set(g).intersection(set(group))) > 0:
@@ -213,6 +214,7 @@ def findGroups(students, prevGroups, customGroupings):
                     continue
             groups.append(group)
 
+        print_groups('Tentative custom groups', groups)
         if (len(groups) != numGroups):
             print('Error: You must have {} groups of students.'.format(numGroups))
             exit()
