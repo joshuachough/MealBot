@@ -37,6 +37,7 @@ import random
 import argparse
 import httplib2
 import itertools
+from math import floor
 from tqdm import tqdm
 from datetime import date, timedelta
 from httplib2 import Http
@@ -194,7 +195,7 @@ def findGroups(students, prevGroups, customGroupings):
     groups = []
 
     if customGroupings:
-        numGroups = len(students)/2
+        numGroups = floor(len(students)/GROUP_SIZE)
         odd = True if len(students) % GROUP_SIZE == 1 else False
         if odd:
             print('\nYou will need to enter {} groups of {} students each and 1 group of {} students.'.format(numGroups-1, GROUP_SIZE, GROUP_SIZE+1))
