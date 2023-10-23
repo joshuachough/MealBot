@@ -331,7 +331,10 @@ def sendEmails(groups, sender, subject, rawBody, credentials):
     for grp in groups:
         namesLst = [student.name for student in grp]
         emailsLst = [student.email for student in grp]
-        body = rawBody.replace('{GroupList}', '\n'.join(namesLst))
+        groupList = '\n'.join(namesLst)
+        if len(namesLst) > GROUP_SIZE:
+            groupList += '\n(Note: We have an odd number of students this week, so this is the lucky group with 3 students!)'
+        body = rawBody.replace('{GroupList}', groupList)
         emails = ', '.join(emailsLst)
         message = createMessage(emails, sender, subject, body)
         sendMessage(service, "me", message)
