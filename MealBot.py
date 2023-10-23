@@ -12,22 +12,23 @@
 #   GroupsSheetID.
 #
 # Important Arguments:
-# --SignupFormID:
-#   The ID of the Google Form that students fill out to sign up. The form must have
-#   the following questions:
-#       - First Name (short answer)
-#       - Last Name (short answer)
-#       - Email (short answer)
-#       - Year (short answer)
-#       - College (short answer)
-# --GroupsSheetID:
-#   The ID of the Google Sheet that stores previous groups. The sheet must have
-#   the following columns:
-#       - Week: The week of the group (e.g. "Week 1 | 08/30/21 - 09/05/21")
-#       - Group: The list of names in the group, separated by commas (e.g. "Alex Schurman, Bonnie Schurman")
-# --GroupsRange:
-#   The range of the Google Sheet that stores previous groups. Defaults to Sheet1!A2:B
-# --Message.txt:
+# --email:
+#   The email address from which you want to send the emails. This email address must be a Gmail address.
+# --subject:
+#   The subject line for the emails. The string '{BiWeek}' should appear exactly once in this string; in the sent
+#   emails, '{BiWeek}' will be replaced with the week string (e.g. 'Week 1 & 2 | 01/01/20 - 01/14/20').
+# --custom-groupings:
+#   Use custom groupings instead of random groupings. This will prompt you to enter the custom groupings from a file.
+#   The file should contain a list of comma-separated names of students in each group, with each group on a new line.
+#   EX. Alice, Bob, Charlie
+#       David, Eve
+#       Grace, Henry
+# --this-week-group:
+#   Send emails for this week group instead of next week group. A week group is the group of weeks that MealBot sends
+#   out groupings (i.e. every 1 week, 2 weeks, 3 weeks, etc).
+# --week-group-frequency:
+#   Frequency of week groups (1-52). Defaults to 2 (i.e. every other week).
+# --message-file:
 #   A file with the body of the email you want sent out to each group. The string
 #   '{GroupList}' should appear exactly once in this file; in the sent emails, '{GroupList}'
 #   will be replaced with the list of names in the group, separated by a new line (\n)
@@ -46,27 +47,27 @@ from apiclient import errors, discovery
 
 from utils import *
 
-SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly', 'https://www.googleapis.com/auth/spreadsheets']
-DISCOVERY_DOC = 'https://forms.googleapis.com/$discovery/rest?version=v1'
-FIRST_NAME_QID = '76e2ebcf'
-LAST_NAME_QID = '3b64eca4'
-YEAR_QID = '32825110'
-COLLEGE_QID = '555d65c7'
-OPT_IN_QID = '15019bbd'
-OPT_IN_YES = 'Yes!'
-OPT_IN_NO = 'No.. I want to be taken off the list for now.'
-GROUP_SIZE = 2
+SCOPES              = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly', 'https://www.googleapis.com/auth/spreadsheets']
+DISCOVERY_DOC       = 'https://forms.googleapis.com/$discovery/rest?version=v1'
+FIRST_NAME_QID      = '76e2ebcf'
+LAST_NAME_QID       = '3b64eca4'
+YEAR_QID            = '32825110'
+COLLEGE_QID         = '555d65c7'
+OPT_IN_QID          = '15019bbd'
+OPT_IN_YES          = 'Yes!'
+OPT_IN_NO           = 'No.. I want to be taken off the list for now.'
+GROUP_SIZE          = 2
+APPLICATION_NAME    = 'YSC MEALBOT'
+SIGNUP_FORM_ID      = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
+GROUPS_SHEET_ID     = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
+GROUPS_RANGE        = 'Sheet1!A2:B'
+CREDENTIALS_FILE    = 'client_secret.json'
+TOKEN_FILE          = 'token.json'
 
 # Defaults - can be overridden with arguments.
-DEFAULT_APPLICATION_NAME    = 'YSC MEALBOT'
-DEFAULT_SIGNUP_FORM_ID      = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
-DEFAULT_GROUPS_SHEET_ID     = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
-DEFAULT_GROUPS_RANGE        = 'Sheet1!A2:B'
 DEFAULT_MESSAGE_FILE        = 'Message.txt'
 DEFAULT_BOT_EMAIL_ADDRESS   = 'YSC Mealbot <josh.chough@yale.edu>'
 DEFAULT_SUBJECT             = "[YSC MealBot] {BiWeek} | Your biweekly meal group!"
-DEFAULT_CREDENTIALS_FILE    = 'client_secret.json'
-DEFAULT_TOKEN_FILE          = 'token.json'
 
 class Student:
     def __init__(self, d):
@@ -344,10 +345,10 @@ def mealBot(args):
     message = getMessage(args.message_file)
 
     # Get credentials
-    credentials = getCredentials(args.credentials_file, args.token_file, args.application_name)
+    credentials = getCredentials(CREDENTIALS_FILE, TOKEN_FILE, APPLICATION_NAME)
     
     # Get a list of students
-    students = getStudents(credentials, args.signup_form_id)
+    students = getStudents(credentials, SIGNUP_FORM_ID)
     print_students('Students', students)
     
     if len(students) == 1:
@@ -355,7 +356,7 @@ def mealBot(args):
         return
     
     # Get previous groups
-    prevGroups, sheet = getPrevGroups(credentials, args.groups_sheet_id, args.groups_range)
+    prevGroups, sheet = getPrevGroups(credentials, GROUPS_SHEET_ID, GROUPS_RANGE)
     if sheet is None:
         print('Error: Could not get previous groups.')
         return
@@ -392,35 +393,12 @@ def mealBot(args):
     # Save the groups
     print('Saving groups...', end='')
     week = getWeekString(args.week_group_frequency, args.this_week_group, withNums=True)
-    saveGroups(groups, sheet, args.groups_sheet_id, args.groups_range, week)
+    saveGroups(groups, sheet, GROUPS_SHEET_ID, GROUPS_RANGE, week)
     print('Done')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
                                                     send an email to each group to inform them.''')
-    parser.add_argument('-a', '--application-name',
-                        help='Name of the application. Defaults to "'+DEFAULT_APPLICATION_NAME+'"',
-                        default=DEFAULT_APPLICATION_NAME)
-    parser.add_argument('-c', '--credentials-file',
-                        help='''JSON file containing the credentials provided by Google API. 
-                                Defaults to '''+DEFAULT_CREDENTIALS_FILE,
-                        default=DEFAULT_CREDENTIALS_FILE)
-    parser.add_argument('-t', '--token-file',
-                        help='''JSON file that will contain the token provided by Google API. 
-                                Defaults to '''+DEFAULT_TOKEN_FILE,
-                        default=DEFAULT_TOKEN_FILE)
-    parser.add_argument('-f', '--signup-form-id',
-                        help='''ID of the Google Form that students fill out to sign up.
-                                Defaults to '''+DEFAULT_SIGNUP_FORM_ID,
-                        default=DEFAULT_SIGNUP_FORM_ID)
-    parser.add_argument('-g', '--groups-sheet-id',
-                        help='''ID of the Google Sheet that stores previous groups.
-                                Defaults to '''+DEFAULT_GROUPS_SHEET_ID,
-                        default=DEFAULT_GROUPS_SHEET_ID)
-    parser.add_argument('-r', '--groups-range',
-                        help='''Range of the Google Sheet that stores previous groups.
-                                Defaults to '''+DEFAULT_GROUPS_RANGE,
-                        default=DEFAULT_GROUPS_RANGE)
     parser.add_argument('-e', '--email',
                         help='Gmail address from which to send emails. Defaults to '+DEFAULT_BOT_EMAIL_ADDRESS,
                         default=DEFAULT_BOT_EMAIL_ADDRESS)
