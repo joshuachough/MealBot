@@ -52,6 +52,9 @@ FIRST_NAME_QID = '76e2ebcf'
 LAST_NAME_QID = '3b64eca4'
 YEAR_QID = '32825110'
 COLLEGE_QID = '555d65c7'
+OPT_IN_QID = '15019bbd'
+OPT_IN_YES = 'Yes!'
+OPT_IN_NO = 'No.. I want to be taken off the list for now.'
 GROUP_SIZE = 2
 
 # Defaults - can be overridden with arguments.
@@ -149,11 +152,16 @@ def getCredentials(credentialFilename, tokenFilename, user_agent):
 
 def getStudents(credentials, signupFormId):
     print('Getting students...', end='')
-    students = []
+    students, opted_out = [], []
     service = discovery.build('forms', 'v1', http=credentials.authorize(
     Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
     result = service.forms().responses().list(formId=signupFormId).execute()
     for response in result['responses']:
+        if OPT_IN_QID in response['answers'].keys():
+            opt_in = response['answers'][OPT_IN_QID]['textAnswers']['answers'][0]['value']
+            if opt_in == OPT_IN_NO:
+                opted_out.append(response['respondentEmail'].strip())
+                continue
         students.append(Student({
             'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'].strip(),
             'lastname': response['answers'][LAST_NAME_QID]['textAnswers']['answers'][0]['value'].strip(),
@@ -161,7 +169,7 @@ def getStudents(credentials, signupFormId):
             'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
             'email': response['respondentEmail'].strip()
         }))
-    print('Done')
+    print('Done ({} students, {} opted out)'.format(len(students), len(opted_out)))
     return students
 
 def getPrevGroups(credentials, spreadsheetId, range):
