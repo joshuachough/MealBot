@@ -66,9 +66,9 @@ CREDENTIALS_FILE    = 'client_secret.json'
 TOKEN_FILE          = 'token.json'
 
 # Defaults - can be overridden with arguments.
-DEFAULT_MESSAGE_FILE        = 'Message.txt'
+DEFAULT_MESSAGE_FILE        = 'message.txt'
 DEFAULT_BOT_EMAIL_ADDRESS   = 'YSC Mealbot <josh.chough@yale.edu>'
-DEFAULT_SUBJECT             = "[YSC MealBot] {BiWeek} | Your biweekly meal group!"
+DEFAULT_SUBJECT             = "{BiWeek} | Your biweekly meal group!"
 
 class Student:
     def __init__(self, d):
@@ -304,13 +304,16 @@ def saveGroups(groups, sheet, spreadsheetId, range, week):
         'values': [[week, ', '.join([student.name for student in grp])] for grp in groups]
     }).execute()
 
-def createMessage(toEmails, sender, subject, plaintext):
+def createMessage(sender, subject, plaintext, toEmails=None, bccEmails=None):
     message = EmailMessage()
 
     message.set_content(plaintext)
-    message['To'] = toEmails
+    if toEmails:
+        message['To'] = toEmails
+    if bccEmails:
+        message['Bcc'] = bccEmails
     message['From'] = sender
-    message['Subject'] = subject
+    message['Subject'] = '[YSC MealBot] {}'.format(subject)
 
     encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
     body = {
@@ -338,31 +341,25 @@ def sendEmails(groups, sender, subject, rawBody, credentials):
             groupList += '\n(Note: We have an odd number of students this week, so this is the lucky group with 3 students!)'
         body = rawBody.replace('{GroupList}', groupList)
         emails = ', '.join(emailsLst)
-        message = createMessage(emails, sender, subject, body)
+        message = createMessage(sender, subject, body, toEmails=emails)
         sendMessage(service, "me", message)
 
-def mealBot(args):
-    # Read the message file
-    message = getMessage(args.message_file)
+def sendBroadcastEmail(students, sender, subject, body, credentials):
+    http = credentials.authorize(httplib2.Http())
+    service = discovery.build('gmail', 'v1', http=http)
 
-    # Get credentials
-    credentials = getCredentials(CREDENTIALS_FILE, TOKEN_FILE, APPLICATION_NAME)
-    
-    # Get a list of students
-    students = getStudents(credentials, SIGNUP_FORM_ID)
-    print_students('Students', students)
-    
-    if len(students) == 1:
-        print('Error: You must have more than 1 student.')
-        return
-    
+    emails = ', '.join([student.email for student in students])
+    message = createMessage(sender, subject, body, toEmails=None, bccEmails=emails)
+    sendMessage(service, "me", message)
+
+def groupStudents(args, message, credentials, students):
     # Get previous groups
     prevGroups, sheet = getPrevGroups(credentials, GROUPS_SHEET_ID, GROUPS_RANGE)
     if sheet is None:
         print('Error: Could not get previous groups.')
         return
     print_groups('Previous groups', prevGroups, student=False)
-    
+
     # Find optimal groups
     groups = findGroups(students, prevGroups, args.custom_groupings)
     print_groups('Final groups', groups, emails=True)
@@ -371,7 +368,7 @@ def mealBot(args):
     if input('\nContinue? (Y/n)\n> ').lower() != 'y':
         print('Exiting...')
         return
-    
+
     # Get the week string
     week = getWeekString(args.week_group_frequency, args.this_week_group)
 
@@ -379,10 +376,10 @@ def mealBot(args):
     print('\n ~~~~ EMAIL START ~~~~')
     print('\nFrom: {}'.format(args.email))
     args.subject = args.subject.replace('{BiWeek}', week)
-    print('Subject: {}'.format(args.subject))
+    print('Subject: [YSC MealBot] {}'.format(args.subject))
     print('\nBody:\n{}'.format(message))
     print('\n ~~~~ EMAIL END ~~~~')
-    
+
     # Send email?
     if input('\nSend emails? (Y/n)\n> ').lower() != 'y':
         print('Exiting...')
@@ -397,6 +394,43 @@ def mealBot(args):
     saveGroups(groups, sheet, GROUPS_SHEET_ID, GROUPS_RANGE, week)
     print('Done')
 
+def broadcast(args, message, credentials, students):
+    # Print the email template
+    print('\n ~~~~ EMAIL START ~~~~')
+    print('\nFrom: {}'.format(args.email))
+    print('Subject: [YSC MealBot] {}'.format(args.subject))
+    print('\nBody:\n{}'.format(message))
+    print('\n ~~~~ EMAIL END ~~~~')
+
+    # Send email?
+    if input('\nSend emails? (Y/n)\n> ').lower() != 'y':
+        print('Exiting...')
+        return
+
+    # Send broadcast email with all students BCC'd
+    sendBroadcastEmail(students, args.email, args.subject, message, credentials)
+    print('Sending emails...Done')
+
+def mealBot(args):
+    # Read the broadcast file
+    message = getMessage(args.message_file)
+
+    # Get credentials
+    credentials = getCredentials(CREDENTIALS_FILE, TOKEN_FILE, APPLICATION_NAME)
+
+    # Get a list of students
+    students = getStudents(credentials, SIGNUP_FORM_ID)
+    print_students('Students', students)
+
+    if len(students) == 1:
+        print('Error: You must have more than 1 student.')
+        return
+
+    if args.broadcast:
+        broadcast(args, message, credentials, students)
+    else:
+        groupStudents(args, message, credentials, students)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
                                                     send an email to each group to inform them.''')
@@ -410,6 +444,11 @@ if __name__ == '__main__':
                         help='''File containing the email body ({GroupList} in the file will be replaced 
                                 with the list of students in the group). Defaults to '''+DEFAULT_MESSAGE_FILE,
                         default=DEFAULT_MESSAGE_FILE)
+    parser.add_argument('-b', '--broadcast',
+                        help='''Send a broadcast email to all students. Defaults to False.''',
+                        default=False, const=True,
+                        type=str2bool,
+                        nargs='?')
     parser.add_argument('--custom-groupings',
                         help='''Use custom groupings instead of random groupings. Defaults to False.''',
                         default=False, const=True,
