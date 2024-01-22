@@ -171,7 +171,7 @@ def getStudents(credentials, signupFormId):
             'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
             'email': response['respondentEmail'].strip()
         }))
-    print('Done ({} students, {} opted out)'.format(len(students), len(opted_out)))
+    print('Done ({} opted in, {} opted out)'.format(len(students), len(opted_out)))
     return students
 
 def getPrevGroups(credentials, spreadsheetId, range):
