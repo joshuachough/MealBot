@@ -95,6 +95,7 @@ def generate_combinations(students):
 def filter_combinations(combinations, prevGroups):
     print('Filtering out previously used combinations...', end='')
     new_groups = []
+    prevGroups = set([grp[1] for grp in prevGroups])
     for grp in combinations:
         if frozenset([student.name for student in grp]) not in prevGroups:
             new_groups.append(grp)
@@ -118,14 +119,34 @@ def print_header(header, length):
         print('\n{} [{}]:'.format(header, length))
 
 def print_groups(header, groups, student=True, emails=False):
+    last_week_group = None if student else groups[-1][0]
     print_header(header, len(groups))
+
+    week_group = None
+    week_group_count = 0
+    last_group = []
+
     for grp in groups:
         if not student:
-            print('\t{}'.format(', '.join([name for name in grp])))
+            week, group = grp
+            if week != week_group:
+                if week_group_count > 0:
+                    print('{}'.format(week_group_count))
+                week_group_count = 0
+                print("\t{}: ".format(week), end='')
+                week_group = week
+            week_group_count += 1
+            if week == last_week_group:
+                last_group.append(', '.join([name for name in group]))
         elif emails:
             print('\t{}'.format(', '.join(['{} ({})'.format(student.name, student.email) for student in grp])))
         else:
             print('\t{}'.format(', '.join([student.name for student in grp])))
+
+    if not student:
+        print('{}'.format(week_group_count))
+        for names in last_group:
+            print('\t\t{}'.format(names))
 
 def print_students(header, students):
     print_header(header, len(students))
@@ -176,7 +197,7 @@ def getStudents(credentials, signupFormId):
 
 def getPrevGroups(credentials, spreadsheetId, range):
     print('\nGetting previous groups...', end='')
-    prevGroups = set()
+    prevGroups = []
     sheet = None
     try:
         service = discovery.build('sheets', 'v4', credentials=credentials)
@@ -184,7 +205,7 @@ def getPrevGroups(credentials, spreadsheetId, range):
         result = sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute()
         values = result.get('values', [])
         for row in values:
-            prevGroups.add(frozenset(row[1].split(', ')))
+            prevGroups.append([row[0], frozenset(row[1].split(', '))])
         print('Done')
     except errors.HttpError as error:
         print('Failed')
@@ -294,7 +315,7 @@ def getWeekString(n, thisWeek=False, withNums=False):
     end = start + timedelta(days=weekGroupLength)
     monday = start + timedelta(days=1)
     if withNums:
-        return f"Week {monday.strftime('%W')} & {int(monday.strftime('%W'))+1} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
+        return f"Week {monday.strftime('%W').zfill(2)} & {str(int(monday.strftime('%W'))+1).zfill(2)} | {start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
     else:
         return f"{start.strftime('%m/%d/%y')} - {end.strftime('%m/%d/%y')}"
 
