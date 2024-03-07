@@ -1,3 +1,4 @@
-*.json
+client_secret.json
+token.json
 custom.txt
 __pycache__/

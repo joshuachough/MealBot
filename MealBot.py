@@ -24,8 +24,9 @@
 #       David, Eve
 #       Grace, Henry
 # --this-week-group:
-#   Send emails for this week group instead of next week group. A week group is the group of weeks that MealBot sends
-#   out groupings (i.e. every 1 week, 2 weeks, 3 weeks, etc).
+#   Send emails for this week group instead of next week group. Usually used when you forgot to send out the MealBot
+#   on the first day of the week (Sunday), and you're sending it out a day or more into the week. A week group is the
+#   group of weeks that MealBot sends out groupings (i.e. every 1 week, 2 weeks, 3 weeks, etc).
 # --week-group-frequency:
 #   Frequency of week groups (1-52). Defaults to 2 (i.e. every other week).
 # --message-file:
@@ -45,25 +46,17 @@ from oauth2client import client, tools, file
 import base64
 from email.message import EmailMessage
 from apiclient import errors, discovery
+import json
 
 from utils import *
 
-SCOPES              = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly', 'https://www.googleapis.com/auth/spreadsheets']
-DISCOVERY_DOC       = 'https://forms.googleapis.com/$discovery/rest?version=v1'
-FIRST_NAME_QID      = '76e2ebcf'
-LAST_NAME_QID       = '3b64eca4'
-YEAR_QID            = '32825110'
-COLLEGE_QID         = '555d65c7'
-OPT_IN_QID          = '15019bbd'
-OPT_IN_YES          = 'Yes!'
-OPT_IN_NO           = 'No.. I want to be taken off the list for now.'
-GROUP_SIZE          = 2
-APPLICATION_NAME    = 'YSC MEALBOT'
-SIGNUP_FORM_ID      = '1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Y'
-GROUPS_SHEET_ID     = '15HGJf3WPPFcvcVXvpOw1puazJxxR8SJBX0wk_lpd82g'
-GROUPS_RANGE        = 'Sheet1!A2:B'
 CREDENTIALS_FILE    = 'client_secret.json'
 TOKEN_FILE          = 'token.json'
+IDS_FILE            = 'ids.json'
+SCOPES              = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly', 'https://www.googleapis.com/auth/spreadsheets']
+DISCOVERY_DOC       = 'https://forms.googleapis.com/$discovery/rest?version=v1'
+GROUP_SIZE          = 2
+GROUPS_RANGE        = 'Sheet1!A2:B'
 
 # Defaults - can be overridden with arguments.
 DEFAULT_MESSAGE_FILE        = 'message.txt'
@@ -153,6 +146,13 @@ def print_students(header, students):
     for student in students:
         print('\t{}'.format(student.name))
 
+def getIds(filename):
+    print('Reading ids file...', end='')
+    with open(filename, 'r') as idsFile:
+        ids = json.load(idsFile)
+    print('Done')
+    return ids
+
 def getMessage(messageFilename):
     print('Reading message file...', end='')
     messageFile = open(messageFilename, 'r')
@@ -173,23 +173,22 @@ def getCredentials(credentialFilename, tokenFilename, user_agent):
     print('Done')
     return credentials
 
-def getStudents(credentials, signupFormId):
+def getStudents(credentials, ids):
     print('Getting students...', end='')
     students, opted_out = [], []
-    service = discovery.build('forms', 'v1', http=credentials.authorize(
-    Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
-    result = service.forms().responses().list(formId=signupFormId).execute()
+    service = discovery.build('forms', 'v1', http=credentials.authorize(Http()), discoveryServiceUrl=DISCOVERY_DOC, static_discovery=False)
+    result = service.forms().responses().list(formId=ids["SIGNUP_FORM_ID"]).execute()
     for response in result['responses']:
-        if OPT_IN_QID in response['answers'].keys():
-            opt_in = response['answers'][OPT_IN_QID]['textAnswers']['answers'][0]['value']
-            if opt_in == OPT_IN_NO:
+        if ids["OPT_IN_QID"] in response['answers'].keys():
+            opt_in = response['answers'][ids["OPT_IN_QID"]]['textAnswers']['answers'][0]['value']
+            if opt_in == ids["OPT_IN_NO"]:
                 opted_out.append(response['respondentEmail'].strip())
                 continue
         students.append(Student({
-            'firstname': response['answers'][FIRST_NAME_QID]['textAnswers']['answers'][0]['value'].strip(),
-            'lastname': response['answers'][LAST_NAME_QID]['textAnswers']['answers'][0]['value'].strip(),
-            'year': response['answers'][YEAR_QID]['textAnswers']['answers'][0]['value'],
-            'college': response['answers'][COLLEGE_QID]['textAnswers']['answers'][0]['value'],
+            'firstname': response['answers'][ids["FIRST_NAME_QID"]]['textAnswers']['answers'][0]['value'].strip(),
+            'lastname': response['answers'][ids["LAST_NAME_QID"]]['textAnswers']['answers'][0]['value'].strip(),
+            'year': response['answers'][ids["YEAR_QID"]]['textAnswers']['answers'][0]['value'],
+            'college': response['answers'][ids["COLLEGE_QID"]]['textAnswers']['answers'][0]['value'],
             'email': response['respondentEmail'].strip()
         }))
     print('Done ({} opted in, {} opted out)'.format(len(students), len(opted_out)))
@@ -373,9 +372,9 @@ def sendBroadcastEmail(students, sender, subject, body, credentials):
     message = createMessage(sender, subject, body, toEmails=None, bccEmails=emails)
     sendMessage(service, "me", message)
 
-def groupStudents(args, message, credentials, students):
+def groupStudents(args, ids, message, credentials, students):
     # Get previous groups
-    prevGroups, sheet = getPrevGroups(credentials, GROUPS_SHEET_ID, GROUPS_RANGE)
+    prevGroups, sheet = getPrevGroups(credentials, ids["GROUPS_SHEET_ID"], GROUPS_RANGE)
     if sheet is None:
         print('Error: Could not get previous groups.')
         return
@@ -412,7 +411,7 @@ def groupStudents(args, message, credentials, students):
     # Save the groups
     print('Saving groups...', end='')
     week = getWeekString(args.week_group_frequency, args.this_week_group, withNums=True)
-    saveGroups(groups, sheet, GROUPS_SHEET_ID, GROUPS_RANGE, week)
+    saveGroups(groups, sheet, ids["GROUPS_SHEET_ID"], GROUPS_RANGE, week)
     print('Done')
 
 def broadcast(args, message, credentials, students):
@@ -433,14 +432,17 @@ def broadcast(args, message, credentials, students):
     print('Sending emails...Done')
 
 def mealBot(args):
+    # Read the ids file
+    ids = getIds(IDS_FILE)
+
     # Read the broadcast file
     message = getMessage(args.message_file)
 
     # Get credentials
-    credentials = getCredentials(CREDENTIALS_FILE, TOKEN_FILE, APPLICATION_NAME)
+    credentials = getCredentials(CREDENTIALS_FILE, TOKEN_FILE, ids["APPLICATION_NAME"])
 
     # Get a list of students
-    students = getStudents(credentials, SIGNUP_FORM_ID)
+    students = getStudents(credentials, ids)
     print_students('Students', students)
 
     if len(students) == 1:
@@ -450,7 +452,7 @@ def mealBot(args):
     if args.broadcast:
         broadcast(args, message, credentials, students)
     else:
-        groupStudents(args, message, credentials, students)
+        groupStudents(args, ids, message, credentials, students)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='''Randomly group students to get a meal together and 
@@ -476,9 +478,11 @@ if __name__ == '__main__':
                         type=str2bool,
                         nargs='?')
     parser.add_argument('--this-week-group',
-                        help='''Send emails for this week group instead of next week group. A week group is the
-                                group of weeks that MealBot sends out groupings (i.e. every 1 week, 2 weeks,
-                                3 weeks, etc). Defaults to False.''',
+                        help='''Send emails for this week group instead of next week group. Usually used when
+                                you forgot to send out the MealBot on the first day of the week (Sunday), and
+                                you're sending it out a day or more into the week. A week group is the group
+                                of weeks that MealBot sends out groupings (i.e. every 1 week, 2 weeks, 3 weeks,
+                                etc). Defaults to False.''',
                         default=False, const=True,
                         type=str2bool,
                         nargs='?')
