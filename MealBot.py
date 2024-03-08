@@ -204,6 +204,7 @@ def getPrevGroups(credentials, spreadsheetId, range):
         result = sheet.values().get(spreadsheetId=spreadsheetId, range=range).execute()
         values = result.get('values', [])
         for row in values:
+            # Pack into tuple (week, set of students in group)
             prevGroups.append([row[0], frozenset(row[1].split(', '))])
         print('Done')
     except errors.HttpError as error:
