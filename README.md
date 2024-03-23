@@ -9,13 +9,15 @@ Randomly group people together to get a meal together, and send an email to ever
 
 1. Install Python 3.10.7 or later.
 
-1. Go through the Google Workspace [Python quickstart](https://developers.google.com/gmail/api/quickstart/python) for Gmail
+2. Go through the Google Workspace [Python quickstart](https://developers.google.com/gmail/api/quickstart/python)
 
     In this guide, you should [set up a Google Cloud project](https://developers.google.com/workspace/guides/create-project), enable the Gmail API, configure the OAuth consent screen, and create credentials for a desktop application. Store the credentials JSON file as `client_secret.json` in your working directory.
 
+    Also, make sure to enable the Google Forms and Google Sheets APIs in the Google Cloud project. You can do this by going to the `APIs & Services` tab on the left, clicking on `ENABLE APIS AND SERVICES`, searching for `Google Forms API` and `Google Sheets API`, and enabling them.
+
     > Note: Whichever test user you add when configuring the OAuth consent screen will be the account that sends the emails. If you want to use a different account, then add that account as a test user. When running `MealBot.py` for the first time, you will be prompted to log in to the account that you added as a test user.
 
-1. Create a Google Form for signups
+3. Create a Google Form for signups
 
     Make sure there is at least questions for `First Name`, `Last Name`, `Year`, `College`, and `Opt in?`. The `Opt in?` question should be a multiple choice question with the options `Yes` and `No`.
 
@@ -25,11 +27,11 @@ Randomly group people together to get a meal together, and send an email to ever
 
     (Optional) I also disabled `Restrict to users in <my domain> and its trusted organizations` to allow people to use their non domain email addresses.
 
-1. Create a Google Sheet to track previous groupings
+4. Create a Google Sheet to track previous groupings
 
     Make sure to label the first row of column A `Week` and column B `Grouping`. This will be used to keep track of who has been grouped together in the past, so that the same people don't get grouped together again. `MealBot.py` will automatically update this sheet after sending out the emails to reflect the new groupings, filling in the columns starting at row 2.
 
-1. Find IDs for the Google Form and Google Sheet
+5. Find IDs for the Google Form and Google Sheet
 
     To get the ID for the Google Form/Sheet, open up the form/sheet in editing mode and get the string of characters in the URL before `/edit` (e.g. `1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Z` from `https://docs.google.com/forms/d/1gyiAJszs2akMHrpErmb_ABPzbKIJU5Pd4OUhVXWNj9Z/edit`).
     
@@ -43,14 +45,14 @@ Randomly group people together to get a meal together, and send an email to ever
 
     Put all these IDs in the file `ids.json`.
 
-1. Set up other values
+6. Set up other values
 
     In `ids.json`, set the `APPLICATION_NAME` to the name of your project, `OPT_IN_YES` to the string that corresponds to the `Yes` option in the `Opt in?` question, and `OPT_IN_NO` to the string that corresponds to the `No` option in the `Opt in?` question.
 
-1. Set up `message.txt`.
+7. Set up `message.txt`.
 
     This is the body of the email that will be sent to each person in `PersonList.txt`. The string `{GroupList}` must appear exactly once in the file; it will be replaced with the list of people that were randomly grouped together.
 
-1. Run `python MealBot.py`.
+8. Run `python MealBot.py`.
 
     There are a number of options (run `MealBot.py -h` to see them).
