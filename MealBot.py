@@ -473,6 +473,11 @@ def mealBot(args):
         print('Error: You must have more than 1 student.')
         return
 
+    # Confirm students?
+    if input('\nContinue? (Y/n)\n> ').lower() != 'y':
+        print('Exiting...')
+        return
+
     if args.broadcast:
         broadcast(args, message, credentials, students)
     else:
