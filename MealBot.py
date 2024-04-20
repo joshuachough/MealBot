@@ -47,12 +47,14 @@ import base64
 from email.message import EmailMessage
 from apiclient import errors, discovery
 import json
+import re
 
 from utils import *
 
 CREDENTIALS_FILE    = 'client_secret.json'
 TOKEN_FILE          = 'token.json'
 IDS_FILE            = 'ids.json'
+EXCLUDE_FILE        = 'exclude.txt'
 SCOPES              = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/forms.responses.readonly', 'https://www.googleapis.com/auth/spreadsheets']
 DISCOVERY_DOC       = 'https://forms.googleapis.com/$discovery/rest?version=v1'
 GROUP_SIZE          = 2
@@ -192,6 +194,26 @@ def getStudents(credentials, ids):
             'email': response['respondentEmail'].strip()
         }))
     print('Done ({} opted in, {} opted out)'.format(len(students), len(opted_out)))
+    return students
+
+def excludeStudents(students):
+    with open(EXCLUDE_FILE, 'r') as f:
+        lines = f.read().splitlines()
+    # Check to see if line matches email format
+    excluded_emails, invalid_lines = [], []
+    for line in lines:
+        if re.match(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', line):
+            excluded_emails.append(line)
+        else:
+            invalid_lines.append(line)
+    for invalid_line in invalid_lines:
+        print('=== Warning: Invalid line in {} (not an email): {} ==='.format(EXCLUDE_FILE, invalid_line))
+    if len(excluded_emails) == 0:
+        return students
+    # Exclude students with emails in the excluded list
+    print('Excluding {} student{}...'.format(len(excluded_emails), ('' if len(excluded_emails) == 1 else 's')), end='')
+    students = [student for student in students if student.email not in excluded_emails]
+    print('Done')
     return students
 
 def getPrevGroups(credentials, spreadsheetId, range):
@@ -444,10 +466,16 @@ def mealBot(args):
 
     # Get a list of students
     students = getStudents(credentials, ids)
+    students = excludeStudents(students)
     print_students('Students', students)
 
     if len(students) == 1:
         print('Error: You must have more than 1 student.')
+        return
+
+    # Confirm students?
+    if input('\nContinue? (Y/n)\n> ').lower() != 'y':
+        print('Exiting...')
         return
 
     if args.broadcast:
